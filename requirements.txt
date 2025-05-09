@@ -1,0 +1,4 @@
+aiocqhttp
+pyyaml
+requests_cache
+numpy

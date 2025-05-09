@@ -1,0 +1,10 @@
+adapters:
+  - 
+    adapter: yaqianbot.adapters.aiocqhttp_adapter
+    config:
+      port: 8010
+      host: 127.0.0.1
+plugins:
+  - yaqianbot.plugins.plg_dev
+superusers:
+  - 402254524

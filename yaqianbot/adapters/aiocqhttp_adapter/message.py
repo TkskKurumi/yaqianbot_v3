@@ -63,7 +63,7 @@ class CQMessage(BaseMessage):
     @classmethod
     def from_cq(cls, onebot, event):
         return cqmsg_from_event(onebot, event)
-    def __init__(self, onebot: CQHttp, event, sender: CQSender, texts, images, atids, reply, json, rich: List[MessageSegment]):
+    def __init__(self, onebot: CQHttp, event, sender: CQSender, texts, images, atids, reply, json_msg, rich: List[MessageSegment]):
         self._message_by_id[event["message_id"]] = self
         self.onebot = onebot
         self.event = event
@@ -71,7 +71,7 @@ class CQMessage(BaseMessage):
         self.images = images
         self.sender = sender
         self.reply = reply
-        self.json = json
+        self.json_msg = json_msg
         self.rich = rich
         self.atids = atids
         self.repr_text = "".join(i.repr_text for i in rich)
@@ -86,7 +86,9 @@ class CQMessage(BaseMessage):
             return str(self.event["self_id"]) in self.atids
     
     def sync_send(self, contents):
+
         contents = prepare_contents_for_send(self, contents)
+
         send_kwargs = {
             "message_type": self.event["message_type"],
             "self_id": self.event["self_id"],

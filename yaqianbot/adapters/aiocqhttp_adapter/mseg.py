@@ -18,9 +18,11 @@ def check_pil_is_animated(im: PILImageType):
         return im.n_frames > 1
     except AttributeError as e:
         return False
+
 class CQSendText(BaseText):
     def as_send_segment(self):
         return AIOCQHTTPMessage.text(self.txt)
+
 class CQSendImage(BaseImage):
     def __init__(self, pil: PILImageType):
         self._pil = pil
@@ -71,8 +73,6 @@ class CQSendImage(BaseImage):
     @property
     def repr_text(self):
         return "[图片]"
-
-
 
 class CQImage(BaseImage):
     @classmethod
@@ -126,6 +126,7 @@ class CQImage(BaseImage):
     @property
     def unique_id(self):
         return self.data["file"]
+
 class CQAt(BaseAt):
     def __init__(self, onebot, event, atid):
         self.atid = atid
@@ -133,6 +134,7 @@ class CQAt(BaseAt):
         self.event = event
     def as_send_segment(self):
         return {"type": "at", "data":{"qq": self.atid}}
+
 class CQReply(BaseReply):
     def __init__(self, onebot, event, mid):
         self.mid = mid
@@ -154,4 +156,3 @@ def prepare_contents_for_send(mes: CQMessage, contents: Union[List[Any], Any]):
         segments.append(seg)
     segments = [i.as_send_segment() for i in segments]
     return segments
-        

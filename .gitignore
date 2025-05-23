@@ -1,3 +1,4 @@
-./.conda_env
+.conda_env
 *.pyc
+*.pyd
 main.py

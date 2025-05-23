@@ -10,7 +10,27 @@ class PrintBuf:
                 self.buf.append(sep)
             self.buf.append(str(i))
         self.buf.append(end)
-
+def list_schema_str(obj, indent=0, visited_id=None, max_len=3000):
+    if (not obj):
+        return "[]"
+    if (visited_id is None):
+        visited_id = {}
+    prt = PrintBuf()
+    prt("[ id=%X"%id(obj))
+    visited_id[id(obj)] = obj
+    ls_repr = []
+    if (len(obj)):
+        mx_elem = max(max_len//len(obj), 100)
+    else:
+        mx_elem = max_len
+    for i in obj:
+        ls_repr.append(obj_schema_str(i, indent+2, visited_id=visited_id, max_len=mx_elem))
+    for i in ls_repr:
+        if (len(i) > mx_elem):
+            i = "..." + i[-mx_elem:]
+        prt(" "*(indent+2), i, ",")
+    prt(" "*indent+"]", end="")
+    return prt.get()
 def dict_schema_str(obj, indent=0, visited_id=None, max_len=3000):
     if (visited_id is None):
         visited_id = {}
@@ -42,7 +62,7 @@ def obj_schema_str(obj, indent=0, visited_id=None, max_len=10000):
     elif (isinstance(obj, int)):
         return repr(obj)
     elif (isinstance(obj, list)):
-        return repr(obj)
+        return list_schema_str(obj, indent, max_len=max_len, visited_id=visited_id)
     elif (isinstance(obj, tuple)):
         return repr(obj)
     elif (obj is None):

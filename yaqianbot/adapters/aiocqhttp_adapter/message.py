@@ -86,7 +86,6 @@ class CQMessage(BaseMessage):
             return str(self.event["self_id"]) in self.atids
     
     def sync_send(self, contents):
-
         contents = prepare_contents_for_send(self, contents)
 
         send_kwargs = {

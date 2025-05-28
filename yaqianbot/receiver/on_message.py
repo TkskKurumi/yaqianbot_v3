@@ -4,6 +4,7 @@ from ..utils import argparse
 from functools import wraps
 import re, inspect
 import asyncio
+import traceback
 from ..globals.g_threading import sync_to_aio
 ALL_RECEIVERS = {}
 
@@ -26,6 +27,17 @@ def on_message(fn):
     name = fn.__name__
     ALL_RECEIVERS[name] = fn
     return fn
+
+def on_exception_send_sync(fn):
+    @wraps(fn)
+    def inner(mes):
+        try:
+            fn(mes)
+        except Exception as e:
+            traceback.print_exc()
+            mes.sync_send("出现了谜之错误%s"%e)
+    return inner
+
 
 def command(startswith, kw_options=None, list_options=None, bool_options=None):
     def wrapper(fn):

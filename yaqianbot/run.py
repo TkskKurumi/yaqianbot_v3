@@ -31,7 +31,10 @@ def run():
     end_fn_threading = []
 
     for plg in cfg["plugins"]:
-        plg_module = importlib.import_module(plg)
+        if (isinstance(plg, str)):
+            plg_module = importlib.import_module(plg)
+        else:
+            raise TypeError("config plugin type error %s"%type(plg))
 
     for adapter_cfg in cfg["adapters"]:
         adapter_module = importlib.import_module(adapter_cfg["adapter"])

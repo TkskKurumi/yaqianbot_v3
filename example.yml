@@ -6,5 +6,6 @@ adapters:
       host: 127.0.0.1
 plugins:
   - yaqianbot.plugins.plg_dev
+  - yaqianbot.plugins.sdxl_v0.plg_sdxl
 superusers:
   - 402254524

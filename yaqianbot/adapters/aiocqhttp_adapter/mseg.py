@@ -153,6 +153,8 @@ def prepare_contents_for_send(mes: CQMessage, contents: Union[List[Any], Any]):
             seg = CQSendText(i)
         elif (isinstance(i, PILImageType)):
             seg = CQSendImage(i)
+        else:
+            raise TypeError("未知消息内容类型 %s"%type(i))
         segments.append(seg)
     segments = [i.as_send_segment() for i in segments]
     return segments

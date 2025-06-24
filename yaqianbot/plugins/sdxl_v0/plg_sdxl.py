@@ -6,7 +6,7 @@ from ...globals.g_threading import threading_run
 from .tag_abbr import *
 from .client import Layer, LayerDiffusionRun
 from ...globals import g_cfg
-_COMMON = "best quality, high quality, absurdres, highres, masterpiece/*worst quality, low quality, lowres, blurry, unfinished, sketch, artifacts*/"
+_COMMON = "best quality, high quality, absurdres, highres, masterpiece/*worst quality, low quality, lowres, blurry, unfinished, sketch, artifacts, bad anatomy, watermark*/"
 @on_message
 @threading_run
 @on_exception_send_sync
@@ -43,7 +43,7 @@ def _get_host():
 @command("#XL画")
 def cmd_sdxl_draw(mes: BaseMessage, *args, **kwargs):
     uid = mes.sender.uid
-    p = " ".join(args) + _COMMON
+    p = " ".join((_COMMON,)+args)
     p = process_prompt(uid, p).result
 
     layer = Layer(_get_host(), p)

@@ -40,8 +40,6 @@ def hashi(x, length=60):
             add_data(ord(i))
     else:
         raise TypeError(type(x))
-        add_data(100)
-        add_data(hash(x))
     return ret
 def hashs(x, length=15):
     return hex(hashi(x, length=length*4))[2:].zfill(length)

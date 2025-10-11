@@ -1,4 +1,9 @@
+.yaqianbot
 .conda_env
 *.pyc
 *.pyd
+*.log
 main.py
+tmp*
+temp*
+.group_cai

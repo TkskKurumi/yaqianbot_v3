@@ -6,9 +6,36 @@ import importlib
 from .adapters.base_adapter import BaseAdapter
 from .utils.debug_obj_schema import obj_schema_str
 from .globals import g_cfg
+import os
+
+def _process_cfg_value(v):
+    if (isinstance(v, str)):
+        for i in range(10):
+            chg = False
+            for env_k, env_v in os.environ.items():
+                findstr = "${%s}"%env_k
+                if (findstr in v):
+                    print(findstr, "->", env_v)
+                    v = v.replace(findstr, env_v)
+                    chg = True
+            if (not chg):
+                break
+        return v
+    elif (isinstance(v, dict)):
+        return _process_cfg_dict(v)
+    elif (isinstance(v, list)):
+        return [_process_cfg_value(i) for i in v]
+    else:
+        return v
+
+def _process_cfg_dict(obj):
+    return {k: _process_cfg_value(v) for k, v in obj.items()}
 
 
 def process_cfg(cfg):
+
+    cfg = _process_cfg_dict(cfg)
+
     su = cfg.get("superusers", {})
     su = set(str(i) for i in su)
     cfg["superusers"] = su
@@ -36,7 +63,12 @@ def run():
         else:
             raise TypeError("config plugin type error %s"%type(plg))
 
-    for adapter_cfg in cfg["adapters"]:
+    cfg_adapters = cfg.get("adapters", [])
+    if (not cfg_adapters):
+        print("No adapters")
+        return
+
+    for adapter_cfg in cfg_adapters:
         adapter_module = importlib.import_module(adapter_cfg["adapter"])
         # print("adapter_module", adapter_module)
         adapter_cls = adapter_module.Adapter

@@ -83,8 +83,17 @@ class CQMessage(BaseMessage):
         if (self.event["message_type"] == "private"):
             return True
         else:
+            print("DEBUG: is to me? self_id", str(self.event["self_id"]), "atids", self.atids)
             return str(self.event["self_id"]) in self.atids
     
+    def get_group_name(self):
+        if (self.sender.group_id == "private"):
+            return f"私聊-{self.sender.username}"
+        else:
+            gid = self.sender.group_id
+            info = self.onebot.sync.get_group_info(group_id=gid)
+            return info.get("group_name", "未知群名")
+
     def sync_send(self, contents):
         contents = prepare_contents_for_send(self, contents)
 

@@ -1,1 +1,1 @@
-from .on_message import on_message, command, on_exception_send_sync
+from .on_message import on_message, command, on_exception_send_sync, on_tome, is_su

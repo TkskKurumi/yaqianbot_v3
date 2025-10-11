@@ -1,0 +1,1 @@
+from .volce import img_caption as volce_img_caption

@@ -1,0 +1,28 @@
+rundir: './.group_cai'
+dry_run: false
+reply_min_secs: 60
+reply_max_secs: 600
+reply_min_prob: 0.04
+deepseek_chat:
+  api_key: ''
+  # api_key: 'lmstudio'
+  # base_url: 'http://192.168.31.175:1234/v1'
+  # model: 'qwen/qwen3-30b-a3b-2507'
+
+bocha:
+  api_key: ''
+  base_url: "https://api.bochaai.com/v1"
+
+volce_ark:
+  api_key: ''
+  img_caption_model: 'doubao-seed-1-6-flash-250828'
+
+plugins:
+  - group_cai.handler
+
+adapters:
+  - 
+    adapter: yaqianbot.adapters.aiocqhttp_adapter
+    config:
+      port: 8011
+      host: 0.0.0.0

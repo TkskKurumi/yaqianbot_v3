@@ -36,11 +36,16 @@ class CQSendImage(BaseImage):
     @property
     def unique_id(self):
         return id(self)
-    def as_send_segment(self):
+    
+    def get_bytes(self):
         im = self._pil
-        if ('A' in im.mode):
+        if ("P" in im.mode):
+            format = "GIF"
+            format_kwargs = {"save_all": True}
+        elif ('A' in im.mode):
             format = "PNG"
             format_kwargs = {}
+        
         else:
             format = "JPEG"
             format_kwargs= {"quality": 95}
@@ -67,6 +72,9 @@ class CQSendImage(BaseImage):
         bio.seek(0)
         bytes = bio.read()
         bio.close()
+        return bytes
+    def as_send_segment(self):
+        bytes = self.get_bytes()
 
         b64ascii = base64.b64encode(bytes).decode("ascii")
         return AIOCQHTTPMessage.image(file="base64://"+b64ascii)
@@ -81,34 +89,41 @@ class CQImage(BaseImage):
     def __init__(self, onebot: CQHttp, data):
         self.onebot = onebot
         self.data = data
-        self._pil = None
-        self._anim = []
     @property
     def repr_text(self):
         if (self.data.get("summary")):
             return self.data["summary"]
         return "[图片]"
     def get_pil(self) -> _PILImage.Image:
-        if (self._pil is not None):
+        if (getattr(self, "_pil", None) is not None):
             return self._pil
+        bytes = self.get_bytes()
+        if (getattr(self, "_pil", None) is None):
+            raise Exception("_pil not found after getting bytes")
+        return self._pil
+    def get_bytes(self):
+        if (getattr(self, "_bytes", None) is not None):
+            return self._bytes
         try:
             img_pth = self.onebot.sync.get_image(self.data["file"])
-            ok = path.exists(img_pth)
-        except Exception:
-            ok = False
-        if (ok):
+            found_local_file = path.exists(img_pth)
             self._pil = _PILImage.open(img_pth)
-        else:
-            self._pil = g_requests_cache.get_image(self.data["url"])
-        if (check_pil_is_animated(self._pil)):
-            self._anim = []
-            for i in range(self._pil.n_frames):
-                self._pil.seek(i)
-                self._anim.append(self._pil.convert("RGBA"))
-            self._pil.seek(0)
-        else:
-            self._anim = []
-        return self._pil
+            with open(img_pth, "rb") as f:
+                self._bytes = f.read()
+        except Exception:
+            found_local_file = False
+        
+        if (not found_local_file):
+            sess = g_requests_cache._goc_sess()
+            r = sess.get(self.data['url'])
+            bio = BytesIO()
+            bio.write(r.content)
+            bio.seek(0)
+            self._pil = _PILImage.open(bio)
+            self._bytes = r.content
+        return self._bytes
+            
+        
     @property
     def is_animated(self):
         return check_pil_is_animated(self.get_pil())
@@ -153,6 +168,8 @@ def prepare_contents_for_send(mes: CQMessage, contents: Union[List[Any], Any]):
             seg = CQSendText(i)
         elif (isinstance(i, PILImageType)):
             seg = CQSendImage(i)
+        elif (isinstance(i, BaseImage)):
+            seg = CQSendImage(i.get_pil())
         else:
             raise TypeError("未知消息内容类型 %s"%type(i))
         segments.append(seg)

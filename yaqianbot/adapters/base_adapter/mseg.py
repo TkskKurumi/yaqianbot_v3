@@ -30,6 +30,9 @@ class BaseImage(MessageSegment):
     @abstractmethod
     def get_animation(self):
         pass
+    @abstractmethod
+    def get_bytes(self):
+        pass
     @property
     @abstractmethod
     def unique_id(self):

@@ -16,7 +16,7 @@ def parse(args, kw_options=None, list_options=None, bool_options=None):
     kwargs = dict()
     kw = None
     for i in args:
-        if(i.startswith("-") and (i in kw_options)):
+        if(i.startswith("-") and ((i in kw_options) or (i in bool_options))):
             if(i in bool_options):
                 kwargs[i]=True
             else:
@@ -37,3 +37,4 @@ def parse(args, kw_options=None, list_options=None, bool_options=None):
 if (__name__=="__main__"):
     print(parse("fuck -n 10 -w 100"))
     print(parse("fuck -n 10 \n -w 100 \"\n\""))
+    print(parse("fuck -n 10 \n -w 100 -a \"\n\"", kw_options={"-n"}, bool_options={"-a"}))

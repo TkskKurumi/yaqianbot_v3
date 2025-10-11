@@ -32,5 +32,9 @@ class BaseMessage(ABC):
         return self.sender.get_recent_image()
     
     @abstractmethod
+    def get_group_name(self):
+        raise NotImplementedError()
+
+    @abstractmethod
     def sync_send(self, message):
         raise NotImplementedError()

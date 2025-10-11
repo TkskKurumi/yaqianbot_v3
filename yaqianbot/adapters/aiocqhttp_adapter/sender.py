@@ -1,6 +1,8 @@
 from ..base_adapter import BaseSender
 from ...globals import g_requests_cache
 from ...globals import g_cfg
+
+from aiocqhttp import CQHttp
 class CQSender(BaseSender):
     @classmethod
     def from_onebot(cls, onebot, event):
@@ -26,3 +28,13 @@ class CQSender(BaseSender):
     def get_group_avatar(self):
         url = r"http://p.qlogo.cn/gh/%s/%s/0"%(self.group_id, self.group_id)
         return g_requests_cache.get_image(url)
+    @property
+    def gender_str(self):
+        return self.event.get("sender", {}).get("gender", "unknown")
+    @property
+    def group_privilege(self):
+        if (self.group_id == "private"):
+            return "private_chat"
+        ob: CQHttp = self.onebot
+        info = ob.sync.get_group_member_info(group_id=self.group_id, user_id=self.uid)
+        return info.get("role", "unknown")

@@ -38,3 +38,13 @@ class BaseMessage(ABC):
     @abstractmethod
     def sync_send(self, message):
         raise NotImplementedError()
+
+    @property
+    @abstractmethod
+    def is_group(self):
+        pass
+
+    @property
+    @abstractmethod
+    def self_id(self):
+        pass

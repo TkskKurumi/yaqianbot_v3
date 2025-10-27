@@ -1,7 +1,9 @@
 from __future__ import annotations
 from aiocqhttp import CQHttp
 from ...globals import g_requests_cache
+from ...globals.g_cfg import get as get_cfg
 from os import path
+import traceback
 from PIL import Image as _PILImage
 from ..base_adapter import BaseMessage
 from ..base_adapter.message import *
@@ -10,6 +12,7 @@ from .sender import CQSender
 from typing import Any, List
 from .mseg import *
 from ...globals import g_threading
+import json
 
 MID2IMG = {}
 def set_mes_img(mid, img):
@@ -32,7 +35,7 @@ def cqmsg_from_event(onebot, event):
     for i in event["message"]:
         if (isinstance(i, dict)):
             if (i["type"] == 'image'):
-                img = CQImage(onebot, i["data"])
+                img = CQImage(onebot, event, i["data"])
                 images.append(img)
                 rich.append(img)
             elif (i["type"] == "text"):
@@ -50,6 +53,31 @@ def cqmsg_from_event(onebot, event):
                 mid = i["data"]["id"]
                 reply = CQReply(onebot, event, mid)
                 rich.append(reply)
+            elif (i["type"] == "video"):
+                if (get_cfg("debug", "cqvideo", False)):
+                    print("found video", i)
+                vid = CQVideo(onebot, event, i["data"])
+                rich.append(vid)
+                if (get_cfg("debug", "cqvideo", False)):
+                    try:
+                        print(vid.get_saved_file())
+                    except Exception as e:
+                        traceback.print_exc()
+            else:
+                debug_if_cfg(("debug", "cq_unsupported_mseg"), "Unsupported message segment", i)
+                if (i["type"] == "forward" and get_cfg("debug", "debug_dump_forward", False)):
+                    print("debug dump fwd")
+                    def f():
+                        nonlocal i, onebot, event
+                        print("debug dump fwd threading")
+                        try:
+                            fwd_id = i.get("data", {}).get("id", "")
+                            fwd_msg = onebot.sync.get_forward_msg(self_id=event["self_id"], id=fwd_id)
+                            with open(g_paths.get_file_path("debug", "forward", f"{fwd_id}.json"), "w", encoding="utf-8") as f:
+                                json.dump(fwd_msg, f, ensure_ascii=False)
+                        except Exception:
+                            traceback.print_exc()
+                    g_threading.pool.submit(f)
 
         elif (isinstance(i, str)):
             t = i["data"]["text"]
@@ -83,33 +111,43 @@ class CQMessage(BaseMessage):
         if (self.event["message_type"] == "private"):
             return True
         else:
-            print("DEBUG: is to me? self_id", str(self.event["self_id"]), "atids", self.atids)
             return str(self.event["self_id"]) in self.atids
     
+    @property
+    def is_group(self):
+        return self.event["message_type"] == "group"
+
     def get_group_name(self):
         if (self.sender.group_id == "private"):
             return f"私聊-{self.sender.username}"
         else:
             gid = self.sender.group_id
-            info = self.onebot.sync.get_group_info(group_id=gid)
+            info = self.onebot.sync.get_group_info(group_id=gid, self_id=self.event["self_id"])
             return info.get("group_name", "未知群名")
 
     def sync_send(self, contents):
-        contents = prepare_contents_for_send(self, contents)
+        def trial(c, alter_img=False):
+            contents = prepare_contents_for_send(self, c, alter_img=alter_img)
 
-        send_kwargs = {
-            "message_type": self.event["message_type"],
-            "self_id": self.event["self_id"],
-            "user_id": self.event["user_id"]
-        }
-        if (self.event["message_type"] != "private"):
-            send_kwargs["group_id"] = self.event["group_id"]
-        send_kwargs["message"] = contents
-        if (True):
-            print("DEBUG: send kwargs", obj_schema_str(send_kwargs))
-        result = self.onebot.sync.send_msg(**send_kwargs)
-        mid = result["message_id"]
-        if (_any_sent_img(contents)):
-            mid = set_mes_img(mid, _any_sent_img(contents))
-        print("DEBUG: send success, result", obj_schema_str(result))
-        return contents
+            send_kwargs = {
+                "message_type": self.event["message_type"],
+                "self_id": self.event["self_id"],
+                "user_id": self.event["user_id"]
+            }
+            if (self.event["message_type"] != "private"):
+                send_kwargs["group_id"] = self.event["group_id"]
+            send_kwargs["message"] = contents
+            
+            result = self.onebot.sync.send_msg(**send_kwargs)
+            mid = result["message_id"]
+            if (_any_sent_img(contents)):
+                mid = set_mes_img(mid, _any_sent_img(contents))
+            return contents
+        try:
+            return trial(contents)
+        except Exception:
+            print("maybe image rejected, retry with image filter")
+            return trial(contents, alter_img=True)
+    @property
+    def self_id(self):
+        return str(self.event["self_id"])

@@ -25,7 +25,7 @@ class MessageTool(Message):
         }
     @classmethod
     def from_db(cls, j):
-        return cls(j)
+        return cls(j["data"])
     def to_deepseek(self):
         return self.data
 class MessageUser(Message):
@@ -51,7 +51,7 @@ class MessageUser(Message):
             "userid"  : self.userid,
             "date"    : self.date,
             "content": [i.to_db() for i in self.content],
-            "optinal": self.optional
+            "optional": self.optional
         }
     def to_deepseek(self):
         data = {

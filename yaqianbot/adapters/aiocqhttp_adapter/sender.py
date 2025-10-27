@@ -10,7 +10,7 @@ class CQSender(BaseSender):
         if (event["message_type"] == "group"):
             gid = event["group_id"]
         else:
-            gid = "private"
+            gid = f"private-{uid}"
         if (event["sender"].get("card", "")):
             uname = event["sender"]["card"]
         else:
@@ -36,5 +36,12 @@ class CQSender(BaseSender):
         if (self.group_id == "private"):
             return "private_chat"
         ob: CQHttp = self.onebot
-        info = ob.sync.get_group_member_info(group_id=self.group_id, user_id=self.uid)
+
+        kwargs = {}
+        def f(**kwa):
+            kwargs.update(kwa)
+        f(group_id=self.group_id, user_id=self.uid)
+        if ("self_id" in self.event):
+            f(self_id=self.event["self_id"])
+        info = ob.sync.get_group_member_info(**kwargs)
         return info.get("role", "unknown")

@@ -3,8 +3,11 @@ from yaqianbot.adapters.base_adapter.message import BaseMessage as YBaseMessage
 from yaqianbot.adapters.base_adapter.mseg import MessageSegment as YMessageSegment
 from yaqianbot.adapters.base_adapter.mseg import BaseImage as YBaseImage
 from yaqianbot.adapters.base_adapter.mseg import BaseText as YBaseText
+from yaqianbot.adapters.base_adapter.mseg import BaseVideo as YBaseVideo
 from yaqianbot.globals.g_cfg import get as get_cfg
+from yaqianbot.globals import g_paths
 from .message.mseg_img import MSEGImage
+from .message.mseg_vid import MSEGVideo
 from .message.mseg_txt import MSEGText
 from .message.mseg_any import MSEGRecvAny
 from .message.base_mes import MessageUser, Message, MessageTool, MessageAssistant
@@ -15,14 +18,16 @@ from typing import List, Dict, Any
 from datetime import datetime
 from collections import defaultdict
 from openai import OpenAI
-import json
+import json, re
+import traceback
 from .system_prompt import SYS_PROMPT
 from threading import RLock
 import sqlite3
 from .database.db import read_cursor, write_cursor
 from yaqianbot.utils.debug_obj_schema import obj_schema_str
 from .external_tools.tool_call import add_all_tool
-
+from yaqianbot.globals.g_util import debug_ret
+from .image_search_db import index as image_search_index
 
 def _init_table(cursor: sqlite3.Cursor):
     cursor.execute("""
@@ -42,20 +47,39 @@ def _db_get_messages(group_id, cursor: sqlite3.Cursor):
         msgs = json.loads(blb.decode("utf-8"))
         return [mes_from_db(i) for i in msgs]
 
-
+@debug_ret(("debug", "ymes2mes"), print_exc=True)
 def ymes2mes(ymes: YBaseMessage):
     ycontent: List[YMessageSegment] = ymes.rich
     content = []
     for mseg in ycontent:
         if (isinstance(mseg, YBaseImage)):
-            content.append(MSEGImage(base_img=mseg))
+            mseg_im = MSEGImage(base_img=mseg)
+            content.append(mseg_im)
+            try:
+                mseg_im.save_data_to_db()
+                image_search_index.add_image(mseg_im.image_id)
+            except Exception as e:
+                traceback.print_exc()
         elif (isinstance(mseg, YBaseText)):
             content.append(MSEGText(mseg.txt))
+        elif (isinstance(mseg, YBaseVideo)):
+            try:
+                v = mseg.get_saved_file()
+                content.append(MSEGVideo(base_vid=mseg))
+            except Exception as e:
+                content.append(MSEGRecvAny(repr="[视频文件获取失败]"))
+                print(e)
         else:
             content.append(MSEGRecvAny(mseg.repr_text))
     optional_info = {}
-    optional_info["role"] = ymes.sender.group_privilege
+    try:
+        optional_info["role"] = ymes.sender.group_privilege
+    except Exception as e:
+        optional_info["role"] = "UNKNOWN"
+        traceback.print_exc()
+        print(e)
     optional_info["gender"] = ymes.sender.gender_str
+    optional_info["self_id"] = ymes.self_id
     return MessageUser(
         username=ymes.sender.username,
         userid=ymes.sender.uid,
@@ -94,6 +118,14 @@ def openai_obj_2_dict(obj):
     else:
         return openai_obj_2_dict(obj.__dict__)
 
+def try_find_error_message(msgs, fmt_exc):
+    idxs = re.findall(r"messages\[(\d+)\]", fmt_exc)
+    if (idxs):
+        idx = int(idxs[0])
+        return msgs[int(idx)]
+    return None
+
+
 class GroupSess:
     _opened = {}
     @classmethod
@@ -108,7 +140,7 @@ class GroupSess:
             cls._opened[group_id] = ret
             return ret
 
-    def __init__(self, gid, msgs: List[MessageSegment]):
+    def __init__(self, gid, msgs: List[Message]):
         self.LOCK = G_LOCKS[hash(gid)%G_LOCK_N]
         self.msgs = msgs
         self.group_id = gid
@@ -152,24 +184,44 @@ class GroupSess:
             add_all_tool(mes, function_ls, function_map)
             def create_resp():
                 nonlocal msgs
-                resp = ds_client.chat.completions.create(
-                    messages=SYSTEM_MES+[i.to_deepseek() for i in msgs],
-                    model=get_cfg("deepseek_chat", "model", "deepseek-chat"),
-                    stream=False,
-                    tool_choice="auto",
-                    tools=function_ls
-                )
+                if (get_cfg("debug", "dump_ds_msg", False)):
+                    dump_mes = SYSTEM_MES+[i.to_deepseek() for i in msgs]
+                    outfile = g_paths.get_file_path("debug", "to_deepseek", f"{mes.sender.group_id}.json")
+                    with open(outfile, "w", encoding="utf-8") as f:
+                        json.dump(dump_mes, f, ensure_ascii=False)
+                    print("debug to deepseek json", outfile)
+                try:
+                    resp = ds_client.chat.completions.create(
+                        messages=SYSTEM_MES+[i.to_deepseek() for i in msgs],
+                        model=get_cfg("deepseek_chat", "model", "deepseek-chat"),
+                        stream=False,
+                        tool_choice="auto",
+                        tools=function_ls,
+                        max_completion_tokens=8192
+                    )
+                except Exception as e:
+                    err_mes = try_find_error_message(SYSTEM_MES+msgs, traceback.format_exc())
+                    if (err_mes):
+                        print("Error message", err_mes, err_mes.to_deepseek())
+                    raise e
                 return resp, resp.choices[0].message
             resp, resp_msg = create_resp()
             retry = 5
+            retry_tool = 2
             while (True):
-                if (getattr(resp, "tool_calls", [])):
+                if (getattr(resp_msg, "tool_calls", [])):
                     tool_calls = resp_msg.tool_calls
                     for call in tool_calls:
                         fname = call.function.name
                         fargs = json.loads(call.function.arguments)
-                        fret  = function_map[fname](**fargs)
-                        # keep it raw
+                        if (retry_tool <= 0):
+                            fret = json.dumps({"status": "fail", "reason": "tool call retry count exceed"})
+                        else:
+                            try:
+                                fret = function_map[fname](**fargs)
+                            except Exception as e:
+                                fret = json.dumps({"status": "fail", "reason": "tool call internal error "+repr(e)})
+
                         msgs.append(MessageTool(openai_obj_2_dict(resp_msg)))
                         msgs.append(MessageTool({
                             "role": "tool",
@@ -177,21 +229,26 @@ class GroupSess:
                             "name": fname, 
                             "content": fret
                         }))
-                    resp = ds_client.chat.completions.create(
-                        messages=SYSTEM_MES+[i.to_deepseek() for i in msgs],
-                        model=get_cfg("deepseek_chat", "model", "deepseek-chat"),
-                        stream=False
-                    )
-                    resp_msg = resp.choices[0].message
+                    resp, resp_msg = create_resp()
+                    retry_tool -= 1
                 else:
                     try:
-                        content_mseg, content_send = deepseek_resp_to_send(mes, resp_msg.content)
+                        content_mseg, content_send = deepseek_resp_to_send(mes, resp_msg, resp_msg.content)
                         if (get_cfg("dry_run", False)):
                             print("=== DRY SEND ===", content_send)
                         else:
                             mes.sync_send(content_send)
                     except Exception as e:
                         if (retry>=0):
+                            # try:
+                            #     fmt_exc = traceback.format_exc()
+                            #     if (re.findall(r"messages\[\d+\]", fmt_exc)):
+                            #         idx = int(re.findall(r"messages\[(\d+)\]", fmt_exc)[0])
+                            #         mes = msgs[idx]
+                            #         print("bad message", mes)
+                            # except Exception as e1:
+                            #     print(repr(e1))
+
                             print("==== RETEY ===", retry, e)
                             retry -= 1
                             resp, resp_msg = create_resp()
@@ -201,13 +258,18 @@ class GroupSess:
                             raise e
                     msgs.append(MessageAssistant(content_mseg))
                     break
-            self.msgs = msgs[1:]
+            self.msgs = msgs
             self.save_to_db()
 
 
 
-def deepseek_resp_to_send(ymes: YBaseImage, resp_content: str):
-    content_dict: List[Dict] = json.loads(resp_content)
+def deepseek_resp_to_send(ymes: YBaseImage, resp_msg, resp_content: str):
+    try:
+        content_dict: List[Dict] = json.loads(resp_content)
+    except Exception as e:
+        traceback.print_exc()
+        print(resp_content, resp_msg)
+        raise e
     content_mseg: List[MessageSegment] = [mseg_from_db(i) for i in content_dict]
     for mseg in content_mseg:
         if (isinstance(mseg, MSEGImage) and mseg.get_pil() is None):

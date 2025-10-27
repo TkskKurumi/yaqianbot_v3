@@ -5,9 +5,11 @@ from ...utils.debug_obj_schema import obj_schema_str
 from aiocqhttp import Event, CQHttp
 from functools import partial
 from ...receiver.on_message import on_message_fn_aio
+from ...globals.g_util import debug_if_cfg
+
 async def message_receiver(cqbot: CQHttp, event: Event):
     try:
-        # print("DEBUG", obj_schema_str(event))
+        debug_if_cfg(("debug", "cq_on_event"), obj_schema_str(event))
         await on_message_fn_aio(CQMessage.from_cq(cqbot, event))
         
     except Exception as e:

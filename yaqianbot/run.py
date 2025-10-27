@@ -44,7 +44,7 @@ def process_cfg(cfg):
 def run():  
     cfg = sys.argv[-1]
     print(cfg)
-    with open(cfg, "r") as f:
+    with open(cfg, "r", encoding="utf-8") as f:
         cfg_str = f.read()
     cfg = yaml.safe_load(cfg_str)
     cfg = process_cfg(cfg)

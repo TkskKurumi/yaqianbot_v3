@@ -6,12 +6,12 @@ import re, inspect
 import asyncio
 import traceback
 from ..globals.g_threading import sync_to_aio
+from ..globals.g_util import debug_if_cfg
 ALL_RECEIVERS = {}
 
 async def on_message_fn_aio(mes: BaseMessage):
     global ALL_RECEIVERS
-    print("DEBUG", obj_schema_str(mes))
-    print("all receivers", ALL_RECEIVERS)
+    debug_if_cfg(("debug", "message_repr"), "".join(i.repr_text for i in mes.rich))
     tasks = []
     for name, fn in ALL_RECEIVERS.items():
         if (inspect.iscoroutinefunction(fn)):
@@ -64,14 +64,13 @@ def command(startswith, kw_options=None, list_options=None, bool_options=None):
             t = mes.text_for_command.strip(" \n")
             matched = re.match(startswith, t)
             if (matched):
-                print("DEBUG: match cmd start", startswith, t)
                 prefix = matched.group()
                 remain = t[len(prefix):]
                 args, kwargs = argparse.parse(remain, kw_options, list_options, bool_options)
                 result = fn(mes, *args, **kwargs)
                 return result
             else:
-                print("DEBUG: match cmd fail ", startswith, t)
+                pass
             return None
         return inner
     return wrapper

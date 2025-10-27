@@ -41,6 +41,38 @@ class BaseVoice(MessageSegment):
     @abstractmethod
     def as_wave_data(self, samplerate=16000):
         pass
+
+class BaseVideo(MessageSegment):
+    @abstractmethod
+    def get_saved_file(self):
+        pass
+    @property
+    @abstractmethod
+    def unique_id(self):
+        pass
+    def get_bytes(self):
+        if (getattr(self, "_bytes", None) is not None):
+            return self._bytes
+        with open(self.get_saved_file(), "rb") as f:
+            self._bytes = f.read()
+        return self._bytes
+class BaseSendVideoFile(BaseVideo):
+    
+    def get_saved_file(self):
+        return self.fn
+    def __init__(self, fn):
+        
+        self.fn = fn
+        with open(fn, "rb") as f:
+            self._bytes = f.read()
+    @property
+    def unique_id(self):
+        return self.fn
+    def as_send_segment(self):
+        raise NotImplementedError(f"Video: {self.fn}")
+    @property
+    def repr_text(self):
+        return "[视频]"
 class BaseAt(MessageSegment):
     def __init__(self, atid):
         self.atid = atid

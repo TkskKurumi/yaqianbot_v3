@@ -2,7 +2,7 @@ from ...receiver import on_message, command, on_exception_send_sync
 from ...adapters.base_adapter.message import BaseMessage
 from PIL import Image, ImageFilter
 from collections import defaultdict
-from threading import Lock
+from threading import RLock
 import numpy as np
 import traceback, random
 from ...globals.g_threading import threading_run
@@ -61,7 +61,7 @@ def cmd_sdxl_draw(mes: BaseMessage, *args, **kwargs):
 @on_message
 @threading_run
 @on_exception_send_sync
-@command("#XL以图画图", kw_options={"-s"})
+@command("#XL以图画图", kw_options={"-s", "-l", "-r"})
 def cmd_sdxl_img2img(mes: BaseMessage, *args, **kwargs):
     uid = mes.sender.uid
     p = " ".join((_COMMON,)+args)
@@ -70,7 +70,13 @@ def cmd_sdxl_img2img(mes: BaseMessage, *args, **kwargs):
     im = mes.sender.get_recent_image()
     im = im.get_pil()
 
-    mask = float(kwargs.get("-s", 0.65))
+    l = kwargs.get("-l", None)
+    r = kwargs.get("-r", None)
+    if (l is not None and r is not None):
+        mask = float((float(l)+float(r))/2)
+        mes.sync_send([f"s={mask:.2f}"])
+    else:
+        mask = float(kwargs.get("-s", 0.65))
 
     # mes.sync_send(["mask=%s,kwa=%s"%(mask, kwargs)])
     l0 = Layer(_get_host(), prompt_expr=p)
@@ -95,9 +101,10 @@ def for_deepseek(mes: BaseMessage, prompt):
         print("deepseek requested image gen fail", e)
         return "FAIL: %s"%e
 
+MAX_PERMUTE_QUEUE = 32
 USER_PERMUTE = defaultdict(lambda:None)
 USER_PERMUTE_QUEUE = defaultdict(list)
-UQLOCK = Lock()
+UQLOCK = RLock()
 @on_message
 @threading_run
 @on_exception_send_sync
@@ -113,12 +120,16 @@ def cmd_sdxl_permute(mes: BaseMessage, *args, **kwargs):
     else:
         yml = yaml.safe_load(lns)
         USER_PERMUTE[uid] = yml
-    texts = get_texts(yml)
-    USER_PERMUTE_QUEUE[uid].extend(texts)
-    
-    if (len(USER_PERMUTE_QUEUE[uid])>5):
-        mes.sync_send(["队列长度太长了"])
-        USER_PERMUTE_QUEUE[uid] = USER_PERMUTE_QUEUE[uid][-5:]
+    texts = get_texts(yml, order=True)
+    with UQLOCK:
+        
+        USER_PERMUTE_QUEUE[uid].extend(texts)
+        if (len(USER_PERMUTE_QUEUE[uid])>MAX_PERMUTE_QUEUE):
+            mes.sync_send(["队列长度太长了, 缩减到%d个"%MAX_PERMUTE_QUEUE])
+            ls = list(enumerate(USER_PERMUTE_QUEUE[uid]))
+            ls = random.sample(ls, MAX_PERMUTE_QUEUE)
+            ls.sort()
+            USER_PERMUTE_QUEUE[uid] = [i for idx, i in ls]
     while (True):
         with UQLOCK:
             if (not USER_PERMUTE_QUEUE[uid]):

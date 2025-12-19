@@ -126,7 +126,7 @@ class CQMessage(BaseMessage):
             return info.get("group_name", "未知群名")
 
     def sync_send(self, contents):
-        def trial(c, alter_img=False):
+        def trial(c, alter_img):
             contents = prepare_contents_for_send(self, c, alter_img=alter_img)
 
             send_kwargs = {
@@ -143,11 +143,20 @@ class CQMessage(BaseMessage):
             if (_any_sent_img(contents)):
                 mid = set_mes_img(mid, _any_sent_img(contents))
             return contents
-        try:
-            return trial(contents)
-        except Exception:
-            print("maybe image rejected, retry with image filter")
-            return trial(contents, alter_img=True)
+        for alter_image in [0, 0.2, 0.4, 0.6, 0.8, 1]:
+            try:
+                return trial(contents, alter_img=alter_image)
+            except Exception as exc:
+                if (alter_image==1):
+                    raise exc
+                
+
     @property
     def self_id(self):
         return str(self.event["self_id"])
+    
+    def get_user_avatar(self, uid=None):
+        if (uid is None):
+            return self.sender.get_avatar()
+        url = r"http://q.qlogo.cn/headimg_dl?dst_uin=%s&spec=640&img_type=jpg"%uid
+        return g_requests_cache.get_image(url)

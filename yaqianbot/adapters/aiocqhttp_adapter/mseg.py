@@ -70,7 +70,7 @@ class CQSendImage(BaseImage):
         bytes_limit = 5*_1MB
         bytes_orig, bytes_curr, bio = None, None, None
         orig_w, orig_h = im.size
-        scale = 1
+        scale = min(1, min(65000/orig_w, 65000/orig_h)) # max supported pixels
         def _save():
             nonlocal bytes_limit, bytes_orig, bytes_curr, bio, orig_w, orig_h, scale
             bio = BytesIO()
@@ -262,7 +262,7 @@ def prepare_contents_for_send(mes: CQMessage, contents: Union[List[Any], Any], a
         for idx, i in enumerate(segments):
             if (isinstance(i, BaseImage)):
                 pil = i.get_pil()
-                alt = image_randnoise(pil)
+                alt = image_randnoise(pil, alter_img)
                 segments[idx] = CQSendImage(alt)
     segments = [i.as_send_segment() for i in segments]
     return segments

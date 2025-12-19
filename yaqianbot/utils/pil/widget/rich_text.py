@@ -19,6 +19,8 @@ def _pre1_split_content_linefeed(contents):
                 if (jdx):
                     ret.append(LineFeed())
                 ret.append(j)
+            if (i.endswith("\n")):
+                ret.append(LineFeed())
         else:
             ret.append(i)
     return ret
@@ -34,9 +36,11 @@ def _pre2_split_words(contents):
 def _get_elem_size(i, font: ImageFont.ImageFont):
     if (isinstance(i, Image.Image)):
         return (i.width, i.height)
-    else:
+    elif (isinstance(i, str)):
         ret = font.getbbox(i)
         return ret[-2:]
+    else:
+        raise TypeError("Error render %s type=%s"%(i, type(i)))
 
 def _render_line(line, font_size, font, fill, back, align_y, image_spacing, return_width=False) -> Union[int, Image.Image]:
     if (not line):
@@ -108,12 +112,15 @@ class RichText(Widget):
         trim_width = self.get("trim_width", **kwargs)
         if (isinstance(font, str)):
             try:
-                font = ImageFont.load(font_size)
+                font = ImageFont.load(font)
             except Exception:
                 font = ImageFont.truetype(font, size=font_size)
         
+        print("DEBUG0:", contents)
         contents = _pre1_split_content_linefeed(contents)
+        print("DEBUG1:", contents)
         contents = _pre2_split_words(contents)
+        print("DEBUG2:", contents)
         locals_render_line = partial(_render_line, font_size=font_size, font=font, fill=fill, back=(0, 0, 0, 0), align_y=align_y, image_spacing=image_spacing)
         
 

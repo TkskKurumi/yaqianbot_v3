@@ -3,7 +3,8 @@ from ..external_tools import volce_img_caption
 from ..database.image import (
     get_img_data as db_get_img_data,
     get_img_info as db_get_img_info,
-    update_img_info as db_update_img_info
+    update_img_info as db_update_img_info,
+    Sampler as DBSampler
 )
 from ..database import image as image_db
 from typing import Optional, Dict
@@ -60,7 +61,9 @@ def volce_img_match_desc(image_id, *all_desc):
     query_desc = set(all_desc)-set(cached_desc.keys())
 
     if (not query_desc):
-        return cached_desc
+        ret = {k: cached_desc[k] for k in all_desc}
+        print(all_desc, ret)
+        return ret
     PROMPT = "请你为图片打分，范围0~1，0表示完全不符合描述，1表示完全符合描述。返回的结果符合json格式、不需要任何额外输出、只包含json body、包含且只包含以下示例的keys、为它们填充实际的value："
     PROMPT = PROMPT + "{" + ", ".join(f'{json.dumps(i, ensure_ascii=False)}: float' for i in query_desc) + "}"
     print("PROMPT: ", PROMPT)
@@ -97,7 +100,7 @@ def volce_img_match_desc(image_id, *all_desc):
     if (ok):
         cached_desc.update(resp_dict)
         db_update_img_info(image_id, {"volce_match_desc": cached_desc})
-        return cached_desc
+        return {k: cached_desc[k] for k in all_desc}
     else:
         raise Exception(fail_reason)
 
@@ -159,6 +162,11 @@ INDEX = ImageIndex()
 def add_image(image_id):
     image_pil = image_id2pil(image_id)
     INDEX.add_image(image_id, image_pil)
+
+
+
+
+db_sampler = DBSampler()
 def find_image_by_desc(*descs):
     min_num = get_cfg("image_index_min_num", 128)
     if (INDEX.n < min_num):
@@ -168,9 +176,38 @@ def find_image_by_desc(*descs):
                 add_image(image_id)
             except Exception:
                 pass
+    for i in range(10):
+        add_image(db_sampler.next_image())
     if (not INDEX.n):
         return
+    
     for desc in descs:
         found = INDEX.find_by_desc(desc, k=10)
         if (found):
             return found
+def find_images_by_descs(*descs, k=5):
+    min_num = get_cfg("image_index_min_num", 128)
+    if (INDEX.n < min_num):
+        for i in range(min_num - INDEX.n):
+            try:
+                image_id = image_db.rand_img()
+                add_image(image_id)
+            except Exception:
+                pass
+    for i in range(10):
+        add_image(db_sampler.next_image())
+    image_ids = set()
+    for desc in descs:
+        embd = volce_embd.get_embd(desc)
+        nns = INDEX.find_nns_by_embd(embd, k=5)
+        for cosine_dist, idx in nns:
+            image_id = INDEX.image_ids[idx]
+            image_ids.add(image_id)
+    ret = []
+    for i in image_ids:
+        matching = volce_img_match_desc(i, *descs)
+        ret.append({
+            "image_id": i,
+            "match_desc": matching
+        })
+    return ret

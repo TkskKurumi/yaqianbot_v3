@@ -1,6 +1,6 @@
 from .g_cfg import get as get_cfg
 from functools import wraps, partial
-import traceback
+import traceback, time
 def debug_if_cfg(cfg_path, *args, **kwargs):
     if (get_cfg(*cfg_path, False)):
         print(*args, **kwargs)
@@ -17,8 +17,9 @@ def debug_ret(cfg_path, print_exc=False):
             kwagstr = ", ".join("%s=%s"%(k, repr(v)) for k, v in kwargs)
             dbg(f"{fn.__name__}({argstr}, {kwagstr})")
             try:
+                t = time.time()
                 ret = fn(*args, **kwargs)
-                dbg(f"{fn.__name__}({argstr}, {kwagstr}) = {ret}")
+                dbg(f"{fn.__name__}({argstr}, {kwagstr}) = {ret} in {time.time()-t} secs")
                 return ret
             except Exception as e:
                 dbg(f"{fn.__name__}({argstr}, {kwagstr}) exc", repr(e))

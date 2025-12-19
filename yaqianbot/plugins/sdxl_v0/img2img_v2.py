@@ -17,6 +17,7 @@ from .permute import get_texts
 from . import plg_sdxl
 from ...utils.pil.pal_img import img_pal
 
+from ...utils.algo.km import KuhnMunkres
 @on_message
 @threading_run
 @on_exception_send_sync
@@ -98,19 +99,111 @@ def cmd_xl1test(msg: BaseMessage, *args, **kwargs):
 
     block = int(kwargs.get("-block", 16))
 
-    col0, _, _, _ = img_pal(im0, k=block)
-    _, _, idxs, _ = img_pal(im1, k=block)
-    im1_recolor = [col0[idx] for idx in idxs]
-    im1_recolor = np.array(im1_recolor).astype(np.uint8).reshape((h, w, -1))
-    im1_recolor = Image.fromarray(im1_recolor)
-    msg.sync_send([im0, im1_recolor])
+    col0, _, idx0, _ = img_pal(im0, k=block)
+    col1, _, idx1, _ = img_pal(im1, k=block)
+    km = KuhnMunkres()
+    dists = []
+    maxd = 0
+    for idx, i in enumerate(col0):
+        for jdx, j in enumerate(col1):
+            diff = i-j
+            dist = np.sqrt(np.sum(np.square(diff)))
+            maxd = max(maxd, dist)
+            dists.append((idx, jdx, dist))
+    for idx, jdx, d in dists:
+        km.add_edge(idx, jdx, maxd-d+0.001)
+    matches = km.solve_match()
+    ji_map = [0 for i in range(block)]
+    for idx, jdx, weight in matches:
+        ji_map[jdx] = idx
+    ji_map = np.array(ji_map)
+    idx1_remapped = ji_map[idx1]
+    arr1_remapped = col0[idx1_remapped]
+    im1_remapped = Image.fromarray(arr1_remapped.reshape((h, w, -1)).astype(np.uint8))
 
-    if ("-lo" in kwargs and "-hi" in kwargs):
-        lo = float(kwargs["-lo"])
-        hi = float(kwargs["-hi"])
-        s = (lo+hi)/2
+    msg.sync_send([im1_remapped])
+    
+    s = 1-float(kwargs.get("-s", 0.36))
+
+    if (s<0.5):
+        mn, mx = 0, s*2
     else:
-        s = float(kwargs.get("-s", 0.4))
+        mn, mx = 2*s-1, 1
+    ss = [mn+(mx-mn)*i/(block-1) for i in range(block)]
+    ss = np.array(ss)
+    arr_mask = ss[idx1]
+    arr_mask = arr_mask.reshape((h, w))
+    im_mask = Image.fromarray((arr_mask*255).astype(np.uint8))
+    msg.sync_send([im_mask])
+    l1 = Layer(host, image=im1_remapped, mask=im_mask)
+    msg.sync_send([LayerDiffusionRun(host, [l0, l1]).run()])
+    
 
-    l1 = Layer(host, image=im1_recolor, mask=1-s)
-    msg.sync_send([LayerDiffusionRun(host, [l0, l1]).run(), f"s={s}"])
+
+def meow(kernel: np.ndarray, arr: np.ndarray):
+    kh, kw = kernel.shape
+    h, w, ch = arr.shape
+    ret = 0
+    newh, neww = h-kh+1, w-kw+1
+    for dy in range(kh):
+        for dx in range(kw):
+            ret = arr[dy:dy+newh, dx:dx+neww, :]*kernel[dx, dy] + ret
+    return ret
+
+@on_message
+@threading_run
+@on_exception_send_sync
+@command("#XL2test", kw_options={"-lo", "-hi", "-block", "-s"})
+def cmd_xl2test(msg: BaseMessage, *args, **kwargs):
+    im = msg.sender.get_recent_image().get_pil().convert("RGB")
+    arr = np.asarray(im).astype(np.float32)
+    
+    kernel0 = np.array([[1, 1], [-1, -1]])
+    diff0 = meow(kernel0, arr)
+    dist0 = np.sqrt(np.sum(np.square(diff0), axis=-1))
+
+    kernel1 = np.array([[-1, 1], [-1, 1]])
+    diff1 = meow(kernel1, arr)
+    dist1 = np.sqrt(np.sum(np.square(diff1), axis=-1))
+
+    dist = dist0+dist1
+    dist = (dist-dist.min())/(dist.max()-dist.min())
+    dist_im = Image.fromarray((dist*255).astype(np.uint8))
+    msg.sync_send([dist_im])
+
+
+@on_message
+@threading_run
+@on_exception_send_sync
+@command("#XL左右", kw_options={"-l", "-r", "-gap", "-ar"}, list_options={"-l", "-r"})
+def cmd_xl_left_right(mes: BaseMessage, *args, **kwargs):
+    cpro = " ".join(args)
+    lpro = " ".join(kwargs.get("-l"))
+    lpro = process_prompt(mes.sender.uid, ", ".join([plg_sdxl._COMMON, "<seed:1>", lpro, cpro])).result
+    rpro = " ".join(kwargs.get("-r"))
+    rpro = process_prompt(mes.sender.uid, ", ".join([plg_sdxl._COMMON, "<seed:1>", rpro, cpro])).result
+
+    aspect_ratio = float(kwargs.get("-ar", 9/16))
+    width, height = round(800*sqrt(aspect_ratio)), round(800/sqrt(aspect_ratio))
+
+    arr = np.linspace(-1, 1, width).reshape((1, width)) + np.zeros(shape=(height, 1))
+    
+    gap = float(kwargs.get("-gap", 1/10))
+    if (gap<1e-3):
+        sat = 1e3
+    else:
+        sat = 1/gap
+    arr = np.clip(arr*sat, -1, 1)
+
+    arr = (arr+1)/2*255
+
+    mask_img = Image.fromarray(arr.astype(np.uint8))
+
+    
+    host = plg_sdxl._get_host()
+    l0 = Layer(host, prompt_expr=lpro)
+    l1 = Layer(host, prompt_expr=rpro, mask=mask_img)
+    mes.sync_send([LayerDiffusionRun(host, [l0, l1]).run()])
+
+
+    

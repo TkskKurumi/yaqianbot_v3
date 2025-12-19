@@ -1,32 +1,39 @@
 from yaqianbot.adapters.base_adapter.message import BaseMessage
 from typing import Dict, List
 from .volce import img_caption as volce_img_caption
-from ..message.mseg_img import MSEGImage
+from ..message.mseg_img import MSEGImage, LiteralPILProvider
 from ..image_search_db import index as image_search_index
 from .bocha.bocha_search import add_bocha
 import json
-def build_param(typ, desc):
-    return {"type": typ, "description": desc}
-def build_params(**kwargs):
-    return kwargs
-def build_function(name, desc, required, params):
-    return {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": desc,
-            "parameters": {
-                "type": "object",
-                "properties": params,
-                "required": required
-            }
-        }
-    }
-
+from yaqianbot.globals.g_cfg import get as get_cfg
+from .builder import *
+from .zimage.zimage import add_zimage
     
 
 def add_search_image(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     def f(desc_detail, desc_medium, desc_rough):
+        if (True):
+            excludes = get_cfg("exclude_image_search", [])
+            imgs = image_search_index.find_images_by_descs(desc_detail, desc_medium, desc_rough, *excludes, k=3)
+            def fkey(i):
+                m = i.get("match_desc", {})
+                return m.get(desc_detail, 0) + m.get(desc_medium, 0)*0.1 + m.get(desc_rough, 0)*0.01
+            imgs_filtered = []
+            for i in imgs:
+                ok = True
+                for j in excludes:
+                    if (i["match_desc"][j] > 0.9):
+                        ok = False
+                if (ok):
+                    imgs_filtered.append(i)
+            imgs = imgs_filtered
+            imgs.sort(key=fkey, reverse=True)
+            imgs = imgs[:3]
+            for i in imgs:
+                i["desc"] = image_search_index.volce_goc_img_desc(i["image_id"])
+            return json.dumps(imgs, ensure_ascii=False)
+
+
         ret = {}
         found_any = False
         for level, desc in [("detail", desc_detail), ("medium", desc_medium), ("rough", desc_rough)]:
@@ -88,10 +95,36 @@ def add_get_img_desc(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     )
     tool_ls.append(func)
     tool_map["get_img_desc"] = f
+def add_get_user_avatar(mes: BaseMessage, tool_ls: List, tool_map: Dict):
+    def f(userid: str):
+        avt = mes.get_user_avatar(userid)
+        m = MSEGImage(base_img=LiteralPILProvider(avt))
+        m.save_data_to_db()
+        ret = {
+            "userid": userid,
+            "avatar": m.to_deepseek()
+        }
+        return json.dumps(ret, ensure_ascii=False)
+
+    desc = "获取用户的头像信息，参数为userid。"
+    func = build_function(
+        name="get_user_avatar",
+        desc=desc,
+        required=["userid"],
+        params=build_params(
+            userid=build_param(
+                typ="string",
+                desc="用户的账号ID。"
+            )
+        )
+    )
+
+    tool_ls.append(func)
+    tool_map["get_user_avatar"] = f
 
 
 
 def add_all_tool(mes: BaseMessage, tool_ls:List, tool_map:Dict):
-    for i in [add_get_img_desc, add_search_image, add_bocha]:
+    for i in [add_get_img_desc, add_search_image, add_bocha, add_get_user_avatar, add_zimage]:
         i(mes, tool_ls, tool_map)
     

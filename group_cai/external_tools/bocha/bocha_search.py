@@ -6,6 +6,8 @@ from io import BytesIO
 from yaqianbot.globals.g_cfg import get as get_cfg
 import json, traceback
 from ...message.mseg_img import LiteralPILProvider, MSEGImage
+from concurrent.futures import ThreadPoolExecutor
+from ...image_search_db import index as image_index
 def build_param(typ, desc):
     return {"type": typ, "description": desc}
 def build_params(**kwargs):
@@ -30,13 +32,13 @@ def add_bocha(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     if (key is None):
         return
     def f(query: str):
-        # if (mes):
-        #     mes.sync_send(["正在搜索: "+query])
+        if (mes):
+            mes.sync_send(["(🔍)"])
         endpoint = get_cfg("bocha", "base_url", "https://api.bochaai.com/v1") + "/web-search"
         data = json.dumps({
             "query": query,
             "summary": True,
-            "count": 15
+            "count": 5
         })
         headers = {
             'Authorization': 'Bearer '+key,
@@ -56,19 +58,27 @@ def add_bocha(mes: BaseMessage, tool_ls: List, tool_map: Dict):
             ret["web_pages"].append(filtered)
         
         ret["web_images"] = []
-        for i in j.get("data", {}).get("images", {}).get("value", []):
+        tasks = []
+        pool = ThreadPoolExecutor(max_workers=4)
+        def f(i):
             url = i["contentUrl"]
+            if (url.startswith("//")):
+                url = "https:"+url
+            r = requests.get(url)
+            bio = BytesIO()
+            bio.write(r.content)
+            bio.seek(0)
+            pil = Image.open(bio)
+            m = MSEGImage(base_img=LiteralPILProvider(pil))
+            m.save_data_to_db()
+            image_index.add_image(m.image_id)
+            return m.to_deepseek()
+        for i in j.get("data", {}).get("images", {}).get("value", []):
+            tasks.append(pool.submit(f, i))
+        for i in tasks:
             try:
-                if (url.startswith("//")):
-                    url = "https:"+url
-                r = requests.get(url)
-                bio = BytesIO()
-                bio.write(r.content)
-                bio.seek(0)
-                pil = Image.open(bio)
-                m = MSEGImage(base_img=LiteralPILProvider(pil))
-                m.save_data_to_db()
-                ret["web_images"].append(m.to_deepseek())
+                result = i.result()
+                ret["web_images"].append(result)
             except Exception as e:
                 traceback.print_exc()
                 print(e)

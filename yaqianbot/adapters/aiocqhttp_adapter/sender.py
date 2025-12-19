@@ -8,7 +8,7 @@ class CQSender(BaseSender):
     def from_onebot(cls, onebot, event):
         uid = str(event["user_id"])
         if (event["message_type"] == "group"):
-            gid = event["group_id"]
+            gid = str(event["group_id"])
         else:
             gid = f"private-{uid}"
         if (event["sender"].get("card", "")):
@@ -33,7 +33,7 @@ class CQSender(BaseSender):
         return self.event.get("sender", {}).get("gender", "unknown")
     @property
     def group_privilege(self):
-        if (self.group_id == "private"):
+        if (str(self.group_id).startswith("private")):
             return "private_chat"
         ob: CQHttp = self.onebot
 

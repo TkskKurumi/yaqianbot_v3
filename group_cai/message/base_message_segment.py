@@ -14,7 +14,9 @@ class MessageSegment(ABC):
     @abstractmethod
     def to_db(self):
         pass
-
+    @abstractmethod
+    def to_send(self):
+        pass
 
 TYPE2CLS: Dict[str, Type[MessageSegment]] = {}
 def add_type(typename, cls):

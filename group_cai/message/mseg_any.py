@@ -17,6 +17,7 @@ class MSEGRecvAny:
             "type": "any",
             "repr": self.repr
         }
-
+    def to_send(self):
+        return str(self.repr)
 add_type("any", MSEGRecvAny)
 

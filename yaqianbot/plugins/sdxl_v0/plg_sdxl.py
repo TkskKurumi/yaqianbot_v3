@@ -50,13 +50,14 @@ def _get_host():
 @command("#XL画")
 def cmd_sdxl_draw(mes: BaseMessage, *args, **kwargs):
     uid = mes.sender.uid
+    p0 = " ".join(args)
     p = " ".join((_COMMON,)+args)
     p = process_prompt(uid, p).result
 
     layer = Layer(_get_host(), p)
     ldr = LayerDiffusionRun(_get_host(), [layer])
     result = ldr.run()
-    mes.sync_send([result])
+    mes.sync_send([result, p0])
 
 @on_message
 @threading_run
@@ -136,8 +137,13 @@ def cmd_sdxl_permute(mes: BaseMessage, *args, **kwargs):
                 break
             t = USER_PERMUTE_QUEUE[uid][0]
             USER_PERMUTE_QUEUE[uid] = USER_PERMUTE_QUEUE[uid][1:]
+            uq_cnt = len(USER_PERMUTE_QUEUE[uid])
         mes.sync_send(["正在生成",t])
         for_deepseek(mes, t)
+        with UQLOCK:
+            if (uq_cnt!=len(USER_PERMUTE_QUEUE[uid])):
+                mes.sync_send(["another worker is running"])
+                return
         if (not USER_PERMUTE_QUEUE[uid]):
             mes.sync_send(["结束了"])
 

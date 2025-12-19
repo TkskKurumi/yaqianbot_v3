@@ -63,7 +63,7 @@ def vid_caption(vid: Union[VideoFileClip, str, bytes], prompt=PROMPT_DEFAULT, pr
                     bn.update(data)
                     bn = bn.hexdigest()
                 svpth = g_paths.get_file_path("temp", "video", "thumb", bn+".mp4")
-                compress(vid, svpth)
+                compress(clip, svpth)
             with open(svpth, "rb") as f:
                 data = f.read()
     elif (isinstance(vid, bytes)):
@@ -71,10 +71,11 @@ def vid_caption(vid: Union[VideoFileClip, str, bytes], prompt=PROMPT_DEFAULT, pr
         if (len(data) > SIZE_LIM):
             bn = hashlib.md5()
             bn.update(data)
+            bn = bn.hexdigest()
             svpth = g_paths.get_file_path("temp", "video", "thumb", bn+".mp4")
             with open(svpth, "wb") as f:
                 f.write(data)
-            return vid_caption(svpth, propmt=prompt, prompt_ex=prompt_ex)
+            return vid_caption(svpth, prompt=prompt, prompt_ex=prompt_ex)
     else:
         if (hasattr(vid, "filename")):
             fn = vid.filename

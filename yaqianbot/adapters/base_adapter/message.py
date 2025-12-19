@@ -48,3 +48,6 @@ class BaseMessage(ABC):
     @abstractmethod
     def self_id(self):
         pass
+
+    def get_user_avatar(self, uid=None):
+        pass

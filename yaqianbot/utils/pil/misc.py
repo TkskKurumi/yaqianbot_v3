@@ -14,23 +14,36 @@ def paste(lower, upper, lefttop):
 
 
 
-def image_randnoise(pil: Image.Image):
-    if (pil.mode=="P" or "A" in pil.mode):
-        pil = pil.convert("RGBA")
-    else:
-        pil = pil.convert("RGB")
-    arr = np.asarray(pil)
-    shape = arr.shape
-    arr = arr.flatten()
-    n = arr.shape[0]
-    for i in range(100):
-        j = random.randrange(n)
-        if (arr[j]>128):
-            arr[j] = 0
+def image_randnoise(pil: Image.Image, strength=0.5):
+    if (True):
+        if pil.mode in ["P", "RGBA", "LA"]:
+            pil = pil.convert("RGBA")
         else:
-            arr[j] = 255
-    arr = arr.reshape(shape)
-    return Image.fromarray(arr.astype(np.uint8))
+            pil = pil.convert("RGB")
+        
+        arr = np.asarray(pil)
+        meow = [0b1, 0b11, 0b111, 0b1111, 0b11111, 0b111111]
+        meow = meow[min(int(strength*len(meow)), len(meow)-1)]
+        arr = np.bitwise_xor(arr, meow)
+        ret = Image.fromarray(arr)
+        return ret
+    else:
+        if (pil.mode=="P" or "A" in pil.mode):
+            pil = pil.convert("RGBA")
+        else:
+            pil = pil.convert("RGB")
+        arr = np.asarray(pil)
+        shape = arr.shape
+        arr = arr.flatten()
+        n = arr.shape[0]
+        for i in range(100):
+            j = random.randrange(n)
+            if (arr[j]>128):
+                arr[j] = 0
+            else:
+                arr[j] = 255
+        arr = arr.reshape(shape)
+        return Image.fromarray(arr.astype(np.uint8))
 
 if (__name__=="__main__"):
     im = Image.open(r"E:\Pics\tmp.gif")

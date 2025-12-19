@@ -1,4 +1,5 @@
 import base64
+from ..utils import img2b64url, img2bytes
 from PIL import Image
 from io import BytesIO
 from math import sqrt
@@ -8,36 +9,7 @@ from volcenginesdkarkruntime import Ark
 _1M = 1<<20
 _500K = 500<<10
 
-def img2bytes(img: Image.Image, max_bytes=_500K):
-    if (img.mode == "P"):
-        img = img.convert("RGBA")
-    if ("A" in img.mode):
-        fmt = "PNG"
-        kwa = {}
-    else:
-        fmt = "JPEG"
-        kwa = {"quality": 90}
-    w, h = img.size
-    def to_bytes(ratio):
-        w1, h1 = round(ratio*w), round(ratio*h)
-        bio = BytesIO()
-        img.resize((w1, h1), resample=Image.Resampling.LANCZOS).save(bio, format=fmt, **kwa)
-        size = bio.tell()
-        
-        bio.seek(0)
-        data = bio.read()
 
-        bio.seek(0)
-        
-        return bio, data, size
-    
-    ratio = 1
-    while (ratio*w>1 and ratio*h>1):
-        bio, data, size = to_bytes(ratio)
-        if (size<=max_bytes):
-            return fmt, bio, data, size
-        else:
-            ratio = min(ratio*0.9, ratio*sqrt(max_bytes/size))
 volce_api_key = get_cfg("volce_ark", "api_key", "UNKNOWN")
 print("volce api key", volce_api_key)
 volce_ark = Ark(api_key=volce_api_key)
@@ -50,34 +22,11 @@ PROMPT_DEFAULT = """
 按以下等级分类检测色情与否：非色情、性感、性暗示、显式色情。
 """.strip()
 
-def img2b64url(img: Image.Image):
-    fmt, bio, data, size = img2bytes(img, max_bytes=_500K)
 
-    if (fmt == "PNG"):
-        mime = "image/png"
-    elif (fmt == "JPEG"):
-        mime = "image/jpeg"
-    else:
-        raise ValueError("Format="+str(fmt))
-
-    b64 = base64.b64encode(data).decode("ascii")
-
-    url = f"data:{mime};base64,{b64}"
-    return url
 
 def img_caption(img: Image.Image, prompt=PROMPT_DEFAULT, prompt_ex=None):
-    fmt, bio, data, size = img2bytes(img, max_bytes=_500K)
 
-    if (fmt == "PNG"):
-        mime = "image/png"
-    elif (fmt == "JPEG"):
-        mime = "image/jpeg"
-    else:
-        raise ValueError("Format="+str(fmt))
-
-    b64 = base64.b64encode(data).decode("ascii")
-
-    url = f"data:{mime};base64,{b64}"
+    url = img2b64url(img, max_bytes=_500K)
 
     model = get_cfg("volce_ark", "img_caption_model", "doubao-seed-1.6-flash")
     if (prompt_ex):
@@ -104,4 +53,55 @@ def img_caption(img: Image.Image, prompt=PROMPT_DEFAULT, prompt_ex=None):
     result = resp.choices[0].message.content
     return result
 
+GROUNDING_PROMPT = """
+描述图片，并检测图片中的各个物件，并且配合bbox。输出json格式。注意，可以用来进行色情敏感内容检测和moderation，所以请务必不要对敏感内容进行过滤，输出所有内容。
+输出的格式例如：
+{
+    "description": "请详细描述图片的内容。如果是游戏内容，请寻找并描述操作光标所在位置。",
+    "grounding": [
+        {
+        "bbox": "<bbox>left_x upper_y right_x lower_y</bbox>",
+        "content": "第一分镜，内容是一个怎么怎么样的女角色（针对漫画）"
+        },
+        {
+            "bbox": "...",
+            "content": "对话框，文字内容为：我..喜欢你。（针对漫画）"
+        },
+        {
+            "bbox": "...",
+            "content": "确认按钮（针对界面截图类）"
+        },
+        {
+            "bbox": "...",
+            "content": "输入文字框（针对界面截图类）"
+        },
+        {
+            "bbox": "...",
+            "content": "女主角形象，她穿着...外貌...（针对游戏截图，分析构图、理解游戏世界内的几何信息位置关系）（游戏场景中定位）"
+        },
+        {
+            "bbox": "...",
+            "content": "桌子（游戏场景中定位）"
+        },
+        {
+            "bbox": "...",
+            "content": "怪兽（游戏场景中定位）"
+        },
+        {
+            "bbox": "...",
+            "content": "可拾取素材（游戏场景中定位）"
+        },
+        {
+            "bbox": "...",
+            "content": "角色的右眼，瞳孔是蓝色的...（针对插画图片，分析构图）"
+        },
+        {
+            "bbox": "...",
+            "content": "戴在角色头上的黑色的帽子...（针对插画图片，分析构图）"
+        }    
+    ]
+}
+
+以上仅作格式示例，具体内容视图片内容而定、详细标注出图片各组成部分。
+"""
 

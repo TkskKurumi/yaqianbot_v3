@@ -9,19 +9,21 @@ LCK = RLock()
 
 @contextmanager
 def read_cursor():
-    conn = sqlite3.connect(get_file_path("db.sqlite3"), check_same_thread=False)
-    try:
-        yield conn.cursor()
-    finally:
-        conn.close()
+    with LCK:
+        conn = sqlite3.connect(get_file_path("db.sqlite3"), check_same_thread=False)
+        try:
+            yield conn.cursor()
+        finally:
+            conn.close()
 @contextmanager
 def write_cursor():
-    conn = sqlite3.connect(get_file_path("db.sqlite3"), check_same_thread=False)
-    try:
-        yield conn.cursor()
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    with LCK:
+        conn = sqlite3.connect(get_file_path("db.sqlite3"), check_same_thread=False)
+        try:
+            yield conn.cursor()
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()

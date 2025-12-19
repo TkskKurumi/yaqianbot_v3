@@ -9,62 +9,97 @@ from .group_sess import GroupSess
 import random
 import time
 import traceback
-last_t = time.time()
+from collections import defaultdict
+
+WAIT_T = dict()
+LAST_T = defaultdict(lambda:time.time())
+
+def get_schedule_key(mes: YBaseMessage):
+    if (get_cfg("message_schedule", "by_group", True)):
+        return mes.sender.group_id
+    return "happy"
+
+
+def trigger_by_time(mes):
+    global LAST_T
+    key = get_schedule_key(mes)
+    t = time.time()
+    last_t = LAST_T[key]
+    min_t = get_cfg("message_schedule", "trigger_sec_min", 30)
+    max_t = get_cfg("message_schedule", "trigger_sec_max", 30)
+    
+    ratio = (t-last_t)/(max_t-min_t)
+    min_prob = get_cfg("message_schedule", "trigger_prob_min", 0)
+    max_prob = get_cfg("message_schedule", "trigger_prob_max", 1)
+    prob = min_prob + ratio*(max_prob-min_prob)
+    if (prob<min_prob):
+        # elapse_t < min_t
+        return False
+    rnd = random.random()
+    return rnd<prob
+def trigger_by_kwd(mes: YBaseMessage):
+    mes_repr = "".join(i.repr_text for i in mes.rich)
+    prob = get_cfg("message_schedule", "trigger_kwd_prob", 0.1)
+    for kwd in get_cfg("message_schedule", "trigger_kwd", ["菜包"]):
+        if (kwd in mes_repr):
+            if (random.random() < prob):
+                return True
+    return False
+def wait_and_reply(mes: YBaseMessage):
+    global WAIT_T, LAST_T
+    gid = mes.sender.group_id
+    key = get_schedule_key(mes)
+    this_time = time.time()
+    WAIT_T[key] = this_time
+    wait_batch = get_cfg("message_schedule", "wait_batch_sec", 30)
+    wait_ated  = get_cfg("message_schedule", "wait_ated_sec", wait_batch)
+    if (mes.is_to_me):
+        wait = wait_ated
+    else:
+        wait = wait_batch
+    time.sleep(wait)
+    if (WAIT_T[key] != this_time):
+        print("new message comes")
+        return
+    else:
+        print("is newest message")
+    gsess = GroupSess.open(gid)
+    with gsess.LOCK:
+        trigger = mes.is_to_me
+        if (not trigger):
+            trigger = trigger_by_kwd(mes)
+        if (not trigger):
+            trigger = trigger_by_time(mes)
+        if (not trigger):
+            return
+        gsess.response(mes)
+        LAST_T[key] = time.time()
 @on_message
 @threading_run
-def on_every_message(mes: YBaseMessage):
+@on_exception_send_sync
+@command("#CBClear", kw_options=set())
+def cb_clear(mes: YBaseMessage, *args, **kwargs):
+    if (mes.sender.is_su):
+        for gid in args:
+            gsess = GroupSess.open(gid)
+            with gsess.LOCK:
+                lenth = len(gsess.msgs)
+                gsess.msgs = []
+                gsess.save_to_db()
+            mes.sync_send([f"清除{lenth}条记录"])
+
+@on_message
+@threading_run
+def cb_on_every_message(mes: YBaseMessage):
     try:
-        global last_t
         if (not mes.rich):
             return
-        # if (not mes.is_group):
-        #     return
         gid = mes.sender.group_id
-        uid = mes.sender.uid
 
-        ok = True
-        if (uid in ["402254524", "2235969249"]):
-            ok = True
-        if (not ok):
-            return
-        
         gsess = GroupSess.open(gid)
         with gsess.LOCK:
             gsess.trim_length()
             gsess.add_user_ymes(mes)
-            
-
-            ok = False
-            if (mes.is_to_me):
-                ok = True
-            if (not ok):
-                tm = time.time()-last_t
-                tm_mn, tm_mx = get_cfg("reply_min_secs", 30), get_cfg("reply_max_secs", 300)
-                tm_01 = (tm - tm_mn) / (tm_mx-tm_mn)
-                tm_01 = max(min(tm_01, 1), 0)
-                p_mn, p_mx = get_cfg("reply_min_prob", 0.1), get_cfg("reply_max_prob", 1)
-                prob = p_mn + tm_01*(p_mx-p_mn)
-                rnd = random.random()
-                print("DEBUG: prob %.1f <=> %.1f rand"%(prob, rnd))
-                if (rnd < prob):
-                    ok = True
-            if (not ok):
-                p = get_cfg("reply_keyword_prob", 0.7)
-                kwds = get_cfg("reply_keyword", [])
-
-                if (isinstance(kwds, list)):
-                    for k in kwds:
-                        if (k in mes.text_for_command):
-                            if (random.random()<p):
-                                ok = True
-            
-
-            if (ok):
-                print("ready to response")
-                last_t = time.time()
-                try:
-                    gsess.response(mes)
-                except Exception as e1:
-                    traceback.print_exc()
+        wait_and_reply(mes)
     except Exception as e0:
         traceback.print_exc()

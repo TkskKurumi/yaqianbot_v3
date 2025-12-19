@@ -1,4 +1,11 @@
 from PIL import Image
+from openai import OpenAI
+from typing import Dict, Optional
+from yaqianbot.globals.g_cfg import get as get_cfg
+
+from openai import APIConnectionError
+
+from PIL import Image
 from io import BytesIO
 import base64
 from math import sqrt
@@ -56,3 +63,9 @@ def img2b64url(img: Image.Image, max_bytes=500000):
 
     url = f"data:{mime};base64,{b64}"
     return url
+
+API_KEY = get_cfg("vl_model", "api_key", "")
+BASE_URL = get_cfg("vl_model", "base_url", "http://192.168.31.175:12355/v1")
+MODEL = get_cfg("vl_model", "model", "qwen/qwen3-vl-30b")
+
+CLIENT = OpenAI(api_key=API_KEY, base_url=BASE_URL)

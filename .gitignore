@@ -6,4 +6,8 @@
 main.py
 tmp*
 temp*
+.tmp*
+.VSCodeCounter*
 .group_cai
+.group_cai_test
+.continue

@@ -3,15 +3,19 @@ from .base_message_segment import MessageSegment, add_type
 from typing import Union, Dict
 from types import NoneType
 from yaqianbot.adapters.base_adapter.mseg import BaseImage
+from yaqianbot.globals.g_cfg import get as get_cfg
 from ..external_tools import volce_img_caption
-from ..external_tools.volce import img2bytes
+from ..utils import img2bytes
+from ..external_tools.volce import GROUNDING_PROMPT
 from io import BytesIO
 from PIL import Image
 from ..database.image import get_img_info as db_get_img_info
 from ..database.image import get_img_data as db_get_img_data
 from ..database.image import update_img as db_write_img
 from ..database.image import update_img_info as db_update_img_info
+from ..external_tools.vl_model import one_image_desc
 from typing import Protocol
+import json, traceback
 import hashlib
 class ImageProvider(Protocol):
     unique_id: str
@@ -72,8 +76,15 @@ class MSEGImage(MessageSegment):
         self.desc = db_get_img_info(self.image_id, "desc", None)
         if (self.desc is not None):
             return self.desc
-        pil = self.get_pil()
-        self.desc = volce_img_caption(pil)
+        try:
+            pil = self.get_pil()
+        except Exception as e:
+            traceback.print_exc()
+            return "[失败-无法读取图片]"
+        if (get_cfg("image_desc_volce", True)):
+            self.desc = volce_img_caption(pil)
+        else:
+            self.desc = one_image_desc(pil)
         db_update_img_info(self.image_id, {"desc": self.desc})
         return self.desc
 
@@ -95,11 +106,43 @@ class MSEGImage(MessageSegment):
         ret = {
             "type": "image",
             "image_id": self.image_id,
-            "desc": self.get_desc()
+            "desc": self.get_desc(),
+            # "grounding": self.goc_grounding()
         }
         if (db_get_img_info(self.image_id, "assistant_gen_desc", None) is not None):
             ret["assistant_gen_desc"] = db_get_img_info(self.image_id, "assistant_gen_desc", None)
         return ret
     def to_send(self):
         return self.get_pil()
+    
+    def goc_grounding(self):
+        if (getattr(self, "_grounding", None) is not None):
+            return self._grounding
+        db_cached = db_get_img_info(self.image_id, "grounding", None)
+        if (db_cached is not None):
+            return db_cached
+        api_result = None
+        update_db = True
+        try:
+            api_result = volce_img_caption(self.get_pil(), GROUNDING_PROMPT)
+            print(f"Created grounding for {self.image_id} -> {repr(api_result)}")
+        except Exception as e:
+            traceback.print_exc()
+            print("volce grounding error")
+            api_result = "InternalError - %s"%repr(e)
+            update_db = False
+        try:
+            api_result = json.loads(api_result)
+        except json.JSONDecodeError:
+            traceback.print_exc()
+            print("volce grounding result decode error")
+            pass
+        self._grounding = api_result
+        if (update_db):
+            db_update_img_info(self.image_id, {"grounding": api_result})
+        return api_result
+        
+
+
+
 add_type("image", MSEGImage)

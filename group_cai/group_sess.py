@@ -19,6 +19,7 @@ from datetime import datetime
 from collections import defaultdict
 from openai import OpenAI
 from openai import NOT_GIVEN
+from openai.types.chat import ChatCompletion
 import json, re
 import traceback, tqdm
 import ast, time
@@ -94,13 +95,21 @@ def ymes2mes(ymes: YBaseMessage):
     )
 
 
-ds_client = OpenAI(api_key=get_cfg("deepseek_chat", "api_key", ""), base_url=get_cfg("deepseek_chat", "base_url", "https://api.deepseek.com"))
+ds_client = OpenAI(api_key=get_cfg("deepseek_chat", "api_key", ""), base_url=get_cfg("deepseek_chat", "base_url", "https://api.deepseek.com"), timeout=600)
 G_LOCK_N = 16
 # G_LOCKS = [RLock() for i in range(G_LOCK_N)]
 LOCK_POOL = defaultdict(lambda:RLock())
 LCK = RLock()
 
 SYSTEM_MES = [{"role": "system", "content": SYS_PROMPT}]
+
+def tool_ret2deepseek(obj):
+    if (isinstance(obj, str)):
+        return obj
+    if (isinstance(obj, dict)):
+        # TODO: implement more auto convert like image
+        return json.dumps(obj, ensure_ascii=False)
+    return obj
 
 def openai_obj_2_dict(obj):
     def _is_val_builtin(obj):
@@ -176,7 +185,10 @@ def static_route(provider, model, **kwargs):
 def _trim_length(msgs, num=None, ratio=None):
     if (ratio is not None):
         num = int(len(msgs)*ratio)
-    start = len(msgs)-num
+    elif (num is None):
+        num = int(len(msgs)*0.5)
+    start = max(len(msgs)-num, 0)
+    
     while (start<len(msgs)):
         if (isinstance(msgs[start], MessageUser)):
             break
@@ -231,9 +243,12 @@ class GroupSess:
     
 
 
+    def trim_length(self, num=None, ratio=None):
+        with self.LOCK:
+            self.msgs = _trim_length(self.msgs, num=num, ratio=ratio)
+            self.save_to_db()
 
-
-    def trim_length(self):
+    def trim_length_auto(self):
         with self.LOCK:
             mx = get_cfg("mes_cnt_max", 384)
             mn = get_cfg("mes_cnt_pref", 128)
@@ -256,10 +271,11 @@ class GroupSess:
             route_provider = None
             route_model = None
 
-            top_p = NOT_GIVEN
+            top_p = get_cfg("deepseek_chat", "top_p_initial", 0.5)
+            temperature = get_cfg("deepseek_chat", "temperature_initial", 1)
             @debug_ret(("debug", "deepseek_create_resp"), print_exc=True)
             def create_resp():
-                nonlocal msgs, retry_tool, route_provider, route_model, top_p
+                nonlocal msgs, retry_tool, route_provider, route_model, top_p, temperature
                 if (get_cfg("debug", "show_to_deepseek_progress", False)):
                     it = tqdm.tqdm(msgs, desc=f"processing msg history of {self.group_id}")
                 else:
@@ -279,22 +295,43 @@ class GroupSess:
                     kwa = get_cfg("deepseek_chat", "extra_kwargs", {})
                     if (kwa is None):
                         kwa = {}
-                    resp = ds_client.chat.completions.create(
+                    max_completion_tokens = get_cfg("deepseek_chat", "max_completion_tokens", 2048)
+                    tokens_limit = get_cfg("mes_tokens_max", None)
+                    tokens_cut = get_cfg("mes_tokens_cut", None)
+                    resp: ChatCompletion = ds_client.chat.completions.create(
                         messages=to_deepseek,
                         model=get_cfg("deepseek_chat", "model", "deepseek-chat"),
                         stream=False,
                         tool_choice=tool_choice,
                         tools=function_ls,
-                        max_completion_tokens=4096,
+                        max_completion_tokens=max_completion_tokens,
                         top_p=top_p,
+                        temperature=temperature,
                         **kwa
                     )
+                    resp_msg = resp.choices[0]
+                    tokens_used = resp.usage.total_tokens
+                    tokens_cmpl = resp.usage.completion_tokens
+                    tokens_prpt = resp.usage.total_tokens - resp.usage.completion_tokens
+                    if (resp_msg.finish_reason == "length" and resp.usage.completion_tokens<max_completion_tokens):
+                        raise Exception(f"Completion with {tokens_cmpl} hit model capacity {tokens_used} with prompted {tokens_prpt}")
+                    
                     route_provider = getattr(resp, "provider", None)
                     route_model = getattr(resp, "model", None)
-                    print(f"Response for {self.group_id} created with {resp.usage.total_tokens} tokens, provider/model: {route_provider}/{route_model}, extra_kwa: {kwa}")
-                    tokens_used = resp.usage.total_tokens
-                    tokens_limit = get_cfg("mes_tokens_max", None)
-                    tokens_cut = get_cfg("mes_tokens_cut", None)
+
+                    print(f"Response for {self.group_id} created\n"
+                          f"- Tokens Total/Completion: {tokens_used}/{tokens_cmpl}\n"
+                          f"- Reply Rounds           : {sum(isinstance(i, MessageAssistant) for i in msgs)}\n"
+                          f"- Stop Reason            : {resp_msg.finish_reason}\n"
+                          f"- Provider / Model       : {route_provider} / {route_model}\n"
+                          f"- KWA:                   : {kwa}"
+                          )
+                    # print(f"Response for {self.group_id} created with {tokens_used}/{tokens_cmpl} tokens for reason '{resp_msg.finish_reason}', provider/model: {route_provider}/{route_model}, extra_kwa: {kwa}")
+                    reasoning = getattr(resp.choices[0].message, "reasoning_content", None)
+                    print(f"Reasoning {reasoning} Content {resp.choices[0].message.content}")
+                    if (not resp_msg.message.content and not getattr(resp_msg.message, "tool_calls", [])):
+                        raise Exception(f"Response is empty, maybe thinking hits max cmpl tokens")
+                    
                     if (tokens_limit is not None):
                         if (tokens_used > tokens_limit):
                             if (tokens_cut is None):
@@ -305,18 +342,53 @@ class GroupSess:
                             msgs = _trim_length(msgs, ratio=ratio)
                             print("trimmed message %d -> %d"%(len0, len(msgs)))
                 except Exception as e:
+                    print("failing", repr(e))
                     err_mes = try_find_error_message(SYSTEM_MES+msgs, traceback.format_exc())
                     if (err_mes):
                         print("Error message", err_mes, err_mes.to_deepseek())
+                        print("Error message", err_mes, err_mes.to_db())
                     ratio = None
-                    pttn = r"maximum context length is (\d+) tokens. However, you requested (\d+) tokens"
-                    if (re.findall(pttn, repr(e))):
-                        lim, req = next(iter(re.findall(pttn, repr(e))))
-                        ratio = int(lim)/int(req)
-                    if ("the request exceeds the available context size" in repr(e)):
-                        ratio = 0.5
+                    # pttn = r"maximum context length is (\d+) tokens. However, you requested (\d+) tokens"
+                    # if (ratio is None and re.findall(pttn, repr(e))):
+                    #     lim, req = [int(i) for i in next(iter(re.findall(pttn, repr(e))))]
+                    #     lim = min(lim, get_cfg("mes_tokens_cut", lim))
+                    #     ratio = int(lim)/int(req)
+                    # pttn = r"request \((\d+) tokens.*xceeds the available context size \((\d+) tokens"
+                    # if (ratio is None and re.findall(pttn, repr(e))):
+                    #     req, lim = next(iter(re.findall(pttn, repr(e))))
+                    #     ratio = int(lim)/int(req)
+                    # if (ratio is None and ("the request exceeds the available context size" in repr(e))):
+                    #     ratio = 0.5
+                    # pttn = r"Completion with (\d+) hit model capacity (\d+) with prompted (\d+)"
+                    # if (ratio is None and re.findall(pttn, repr(e))):
+                    #     cmpl, capa, prpt = [int(i) for i in next(iter(re.findall(pttn, repr(e))))]
+                    #     ratio = 1-cmpl/prpt # make space for 1x cmpl
+
+                    ctx_lim, ctx_req = None, None
+                    pttn = r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)"
+                    for req, lim in re.findall(pttn, repr(e)):
+                        ctx_lim = int(lim)
+                        ctx_req = int(req)
+                    pttn = r"Completion with (\d+) hit model capacity (\d+) with prompted (\d+)"
+                    for cmpl, capa, prmp in re.findall(pttn, repr(e)):
+                        ctx_lim = int(capa)
+                        ctx_req = ctx_lim + int(cmpl) # assuming another 1x cmpl to complete
+
+
+                    if (ctx_lim and ctx_req):
+                        if (get_cfg("mes_tokens_cut", None) is not None):
+                            # if confirmed ctx is too long, requirement is exceeding limit
+                            # donot cut just around the limit, cut lower than limit, leave space for incoming future message to reuse prefix cache a bit
+                            ctx_lim = min(ctx_lim, get_cfg("mes_tokens_cut", None))
+                        ratio = ctx_lim/ctx_req
+                        print(f"ctx-lim = {ctx_lim}, ctx-required = {ctx_req}")
+                    # if (ratio is not None):
+                    #     if (tokens_limit and tokens_cut):   
+                    #         ratio = min(tokens_cut/tokens_limit, ratio)
+
                     if (ratio is not None):
-                        ratio = min(ratio, 0.8)
+                        
+                        ratio = max(0, min(ratio, 0.8))
                         orig_msgs = msgs
                         msgs = _trim_length(msgs, ratio=ratio)
                         if (not msgs):
@@ -328,7 +400,6 @@ class GroupSess:
                             except Exception as e1:
                                 traceback.print_exc()
                                 ret = None
-                            msgs = orig_msgs
                             if (ret is not None):
                                 print("succuess with cut context")
                                 return ret
@@ -340,9 +411,39 @@ class GroupSess:
             tool_visited = set()
             
             while (True):
+                convert_contents = ""
+                tool_resps = []
+
+                if (resp_msg.content):
+                    ok, err_msg, contents = handle_deekseek_result(mes, resp_msg, resp_msg.content)
+                    if (ok):
+                        # static_route(route_provider, route_model, success_cnt=1)
+                        convert_contents = contents
+
+                    else:
+                        print(f"==== FAIL ==== retry-remain: {retry}, err_msg: {err_msg}, group_id: {self.group_id}, provider/model: {route_provider}/{route_model}")
+                        print("<=== contents ====")
+                        static_route(route_provider, route_model, success_cnt=0)
+                        static_route(route_provider, route_model, fail_content=openai_obj_2_dict(resp))
+                        print(resp_msg.content)
+                        print("==== contents ===>")
+                        retry -= 1
+                        
+                        top_p       = top_p       * get_cfg("deepseek_chat", "top_p_retry_scale"       , 0.5)
+                        temperature = temperature * get_cfg("deepseek_chat", "templerature_retry_scale", 0.5)
+                        if (retry>=0):
+                            resp, resp_msg = create_resp()
+                            continue
+                        else:
+                            raise Exception(err_msg)
                 if (getattr(resp_msg, "tool_calls", [])):
                     tool_calls = resp_msg.tool_calls
-                    
+                    for call in tool_calls:
+                        fname = call.function.name
+                        if (isinstance(call.function.arguments, str)):
+                            call.function.arguments = json.dumps(json.loads(call.function.arguments), ensure_ascii=False)
+                        elif (isinstance(call.function.arguments, dict)):
+                            call.function.arguments = json.dumps(call.function.arguments, ensure_ascii=False)
                     if (get_cfg("debug", "dump_tool_call")):
                         try:
                             pth = g_paths.get_file_path("debug", "to_deepseek", f"{mes.sender.group_id}.tool.json")
@@ -367,71 +468,25 @@ class GroupSess:
                         else:
                             try:
                                 fret = function_map[fname](**fargs)
+                                fret = tool_ret2deepseek(fret)
 
                             except Exception as e:
                                 traceback.print_exc()
                                 fret = json.dumps({"status": "fail", "reason": "tool call internal error "+repr(e)})
-                        msgs.append(MessageTool(openai_obj_2_dict(resp_msg)))
-                        msgs.append(MessageTool({
+                        # msgs.append(MessageTool(openai_obj_2_dict(resp_msg)))
+                        tool_resps.append(MessageTool({
                             "role": "tool",
                             "tool_call_id": call.id,
                             "name": fname, 
                             "content": fret
                         }))
-                    static_route(route_provider, route_model, success_cnt=1)
-                    resp, resp_msg = create_resp()
                     retry_tool -= 1
+                msgs.append(MessageAssistant(convert_contents, openai_obj_2_dict(getattr(resp_msg, "tool_calls", None))))
+                if (tool_resps):
+                    msgs.extend(tool_resps)
                 else:
-                    ok, err_msg, contents = handle_deekseek_result(mes, resp_msg, resp_msg.content)
-                    if (ok):
-                        static_route(route_provider, route_model, success_cnt=1)
-                        msgs.append(MessageAssistant(contents))
-                        break
-                    else:
-                        print(f"==== FAIL ==== retry-remain: {retry}, err_msg: {err_msg}, group_id: {self.group_id}, provider/model: {route_provider}/{route_model}")
-                        print("<=== contents ====")
-                        static_route(route_provider, route_model, success_cnt=0)
-                        static_route(route_provider, route_model, fail_content=openai_obj_2_dict(resp))
-                        print(resp_msg.content)
-                        print("==== contents ===>")
-                        retry -= 1
-                        if (get_cfg("deepseek_chat", "retry_scale_top_p", None) is not None):
-                            scale = get_cfg("deepseek_chat", "retry_scale_top_p", None)
-                            if (top_p is NOT_GIVEN):
-                                top_p = scale
-                            else:
-                                top_p = top_p*scale
-                        if (retry>=0):
-                            resp, resp_msg = create_resp()
-                        else:
-                            raise Exception(err_msg)
-                    #     if (retry>=0):
-                    # try:
-                    #     content_mseg, content_send = deepseek_resp_to_send(mes, resp_msg, resp_msg.content)
-                    #     if (get_cfg("dry_run", False)):
-                    #         print("=== DRY SEND ===", content_send)
-                    #     else:
-                    #         mes.sync_send(content_send)
-                    # except Exception as e:
-                    #     if (retry>=0):
-                    #         # try:
-                    #         #     fmt_exc = traceback.format_exc()
-                    #         #     if (re.findall(r"messages\[\d+\]", fmt_exc)):
-                    #         #         idx = int(re.findall(r"messages\[(\d+)\]", fmt_exc)[0])
-                    #         #         mes = msgs[idx]
-                    #         #         print("bad message", mes)
-                    #         # except Exception as e1:
-                    #         #     print(repr(e1))
-
-                    #         print("==== RETEY ===", retry, e)
-                    #         retry -= 1
-                    #         resp, resp_msg = create_resp()
-                    #         continue
-                    #     else:
-                    #         print(obj_schema_str(mes))
-                    #         raise e
-                    # msgs.append(MessageAssistant(content_mseg))
-                    # break
+                    break
+                resp, resp_msg = create_resp()
             self.msgs = msgs
             self.save_to_db()
 
@@ -487,6 +542,7 @@ def try_load_json(content):
         ret = json.loads(content)
         ok = True
     except json.JSONDecodeError:
+        print("load json error", content)
         ok = False
     if (ok):
         return ret
@@ -523,20 +579,38 @@ def deepseek_resp_to_send(ymes: YBaseImage, resp_msg, resp_content: str):
 
 def try_send_mseg(ymes: YBaseMessage, mseg: List[MessageSegment]) -> Tuple[bool, str]:
     sent_any = False
+    decompose = len(mseg) <= 3
+    composed = []
+
     for idx, i in enumerate(mseg):
         if (idx):
             time.sleep(1)
+        if (isinstance(i, MSEGImage)):
+            if (i.get_pil() is None):
+                return False, "image is not found %s"%(i.image_id)
         try:
-            to_send = i.to_send()
+            if (decompose):
+                to_send = i.to_send()
+            else:
+                composed.append(i.to_send())
         except Exception as e:
             if (not sent_any):
                 return False, "cannot prepare %s"%(i.to_db())
+        if (decompose):
+            try:
+                ymes.sync_send([to_send])
+            except Exception as e:
+                if (not sent_any):
+                    try:
+                        to_db = i.to_db()
+                    except:
+                        to_db = repr(i)
+                    return False, "cannot send content %s-%s"%(to_db, to_send)
+    if (composed):
         try:
-            ymes.sync_send([to_send])
-        except Exception as e:
-            if (not sent_any):
-                return False, "cannot send content %s-%s"%(i.to_db(), to_send)
-            
+            ymes.sync_send(composed)
+        except:
+            return False, "cannot send %s"%(to_send)
     return True, ""
 
 

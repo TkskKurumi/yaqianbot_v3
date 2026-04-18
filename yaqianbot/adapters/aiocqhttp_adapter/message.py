@@ -13,7 +13,8 @@ from typing import Any, List
 from .mseg import *
 from ...globals import g_threading
 import json
-
+from ...utils.throttle import Throttle
+TH = Throttle(6, 4)
 MID2IMG = {}
 def set_mes_img(mid, img):
     while (len(MID2IMG) > 512):
@@ -141,10 +142,13 @@ class CQMessage(BaseMessage):
             result = self.onebot.sync.send_msg(**send_kwargs)
             mid = result["message_id"]
             if (_any_sent_img(contents)):
-                mid = set_mes_img(mid, _any_sent_img(contents))
+                with TH.throttled():
+                    mid = set_mes_img(mid, _any_sent_img(contents))
             return contents
         for alter_image in [0, 0.2, 0.4, 0.6, 0.8, 1]:
             try:
+                if (alter_image != 0):
+                    print("Try resend image with noise")
                 return trial(contents, alter_img=alter_image)
             except Exception as exc:
                 if (alter_image==1):

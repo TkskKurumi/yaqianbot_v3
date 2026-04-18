@@ -67,25 +67,37 @@ class MessageUser(Message):
             "content": datastr
         }
 class MessageAssistant(Message):
+    # deepseek message now may contain both content and tool_calls, IDK what to do now
     content: List[MessageSegment]
-    def __init__(self, content: List[MessageSegment]):
+    def __init__(self, content: List[MessageSegment], tool_calls: Any):
         self.content = content
+        self.tool_calls = tool_calls
+        if (isinstance(tool_calls, str) and tool_calls == 'null'): # temp bug
+            self.tool_calls = None
     @classmethod
     def from_db(cls, d: Dict):
         content = [mseg_from_db(i) for i in d["content"]]
-        return cls(content)
+        return cls(content, d.get("tool_calls", None))
     def to_db(self):
         return {
             "type": "assistant",
-            "content": [i.to_db() for i in self.content]
+            "content": [i.to_db() for i in self.content],
+            "tool_calls": self.tool_calls
         }
     def to_deepseek(self):
         content = [i.to_deepseek() for i in self.content]
         datastr = json.dumps(content, ensure_ascii=False)
-        return {
-            "role": "assistant",
-            "content": datastr
-        }
+        if (self.tool_calls):
+            return {
+                "role": "assistant",
+                "content": datastr,
+                "tool_calls": self.tool_calls
+            }
+        else:
+            return {
+                "role": "assistant",
+                "content": datastr
+            }
 def mes_from_db(d):
     if (d["type"] == "assistant"):
         return MessageAssistant.from_db(d)

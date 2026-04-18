@@ -262,7 +262,7 @@ def prepare_contents_for_send(mes: CQMessage, contents: Union[List[Any], Any], a
         for idx, i in enumerate(segments):
             if (isinstance(i, BaseImage)):
                 pil = i.get_pil()
-                alt = image_randnoise(pil, alter_img)
+                alt = image_randnoise(pil, alter_img, mode=3)
                 segments[idx] = CQSendImage(alt)
     segments = [i.as_send_segment() for i in segments]
     return segments

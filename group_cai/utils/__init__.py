@@ -56,3 +56,18 @@ def img2b64url(img: Image.Image, max_bytes=500000):
 
     url = f"data:{mime};base64,{b64}"
     return url
+def img2openai(img: Image.Image, max_bytes=500000):
+    return {
+        "type": "image_url",
+        "image_url": {"url": img2b64url(img, max_bytes)}
+    }
+def b64url2img(b64):
+    if (isinstance(b64, bytes)):
+        b64 = b64.decode("ascii")
+    if ("base64," in b64):
+        b64 = b64.split("base64,")[-1]
+    data = base64.b64decode(b64)
+    buffer = BytesIO()
+    buffer.write(data)
+    buffer.seek(0)
+    return Image.open(buffer)

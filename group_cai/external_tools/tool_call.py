@@ -4,11 +4,11 @@ from .volce import img_caption as volce_img_caption
 from ..message.mseg_img import MSEGImage, LiteralPILProvider
 from ..image_search_db import index as image_search_index
 from .bocha.bocha_search import add_bocha
-import json
+import json, random
 from yaqianbot.globals.g_cfg import get as get_cfg
 from .builder import *
 from .zimage.zimage import add_zimage
-    
+from .image_edit.image_edit import add_image_edit
 
 def add_search_image(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     def f(desc_detail, desc_medium, desc_rough):
@@ -69,7 +69,7 @@ def add_search_image(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     )
     tool_ls.append(func)
     tool_map["search_image"] = f
-def add_get_img_desc(mes: BaseMessage, tool_ls: List, tool_map: Dict):
+def add_get_img_qa(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     def f(image_id: str, query_prompt: str):
         if (image_id not in MSEGImage._opened):
             return json.dumps({"status": "fail", "message": "Image not found by id %s"%image_id}, ensure_ascii=False)
@@ -79,7 +79,7 @@ def add_get_img_desc(mes: BaseMessage, tool_ls: List, tool_map: Dict):
         return json.dumps({"status": "ok", "desc": desc, "image_id": image_id}, ensure_ascii=False)
     desc = "调用外部工具，通过多模态AI分析图片内容。接受自然语言输入想要查询的内容。"
     func = build_function(
-        name="get_img_desc",
+        name="get_img_qa",
         desc=desc,
         required=["image_id", "query_prompt"],
         params=build_params(
@@ -94,7 +94,7 @@ def add_get_img_desc(mes: BaseMessage, tool_ls: List, tool_map: Dict):
         )
     )
     tool_ls.append(func)
-    tool_map["get_img_desc"] = f
+    tool_map["get_img_qa"] = f
 def add_get_user_avatar(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     def f(userid: str):
         avt = mes.get_user_avatar(userid)
@@ -122,9 +122,44 @@ def add_get_user_avatar(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     tool_ls.append(func)
     tool_map["get_user_avatar"] = f
 
+def add_fair_dice(mes: BaseMessage, tool_ls: List, tool_map: Dict):
+    def f(dice_num: int, dice_range: int):
+        if (dice_num > 100):
+            raise ValueError("number of dice should be smaller than 100")
+        if (dice_range > 1000):
+            raise ValueError("range of dice should be smaller than 1000")
+        nums = []
+        for i in range(dice_num):
+            nums.append(random.randint(1, dice_range))
+        mes.sync_send(f"投掷了{dice_num}个 1~{dice_range} 骰子: {nums}，总和{sum(nums)}（🎲）")
+        return {"nums": nums, "sum": sum(nums)}
+    desc = "排除大语言模型偏置，“公平”地生成随机数"
+    func = build_function(
+        name="fair_dice",
+        desc=desc,
+        required=["dice_num", "dice_range"],
+        params=build_params(
+            dice_num=build_param(
+                typ="integer",
+                desc="骰子次数",
+                minimum=1,
+                maximum=100
+            ),
+            dice_range=build_param(
+                typ="integer",
+                desc="骰子数值上界"
+            )
+        )
+    )
+    tool_ls.append(func)
+    tool_map["fair_dice"] = f
+        
 
-
-def add_all_tool(mes: BaseMessage, tool_ls:List, tool_map:Dict):
-    for i in [add_get_img_desc, add_search_image, add_bocha, add_get_user_avatar, add_zimage]:
+def add_all_tool(mes: BaseMessage, tool_ls: List = None, tool_map: Dict = None):
+    if (tool_ls is None):
+        tool_ls = []
+    if (tool_map is None):
+        tool_map = {}
+    for i in [add_get_img_qa, add_search_image, add_bocha, add_get_user_avatar, add_zimage, add_image_edit, add_fair_dice]:
         i(mes, tool_ls, tool_map)
-    
+    return tool_ls, tool_map

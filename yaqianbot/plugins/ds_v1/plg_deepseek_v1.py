@@ -192,7 +192,7 @@ class Session:
                 fargs = json.loads(call.function.arguments)
                 fret  = function_map[fname](**fargs)
                 dlgs.append(kwa2dict(role="tool", tool_call_id=call.id, name=fname, content=fret))
-            resp = client.chat.completions.create(model=get_cfg("deepseek_chat", "model", "deepseek-chat"), messages=dlgs)
+            resp = client.chat.completions.create(model=get_cfg("deepseek_chat", "model", "deepseek-chat"), messages=dlgs, tool_choice="auto", tools=function_ls)
             resp_msg = remove_think(resp.choices[0].message)
             dlgs.append(resp_msg)
         self.contents = dlgs

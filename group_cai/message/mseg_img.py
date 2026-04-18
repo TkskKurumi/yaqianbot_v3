@@ -22,13 +22,17 @@ class ImageProvider(Protocol):
     def get_bytes(self) -> bytes: ...
     def get_pil(self) -> Image.Image: ...
 
+HEX_LENGTH = 10
 class LiteralPILProvider(ImageProvider):
-    def __init__(self, pil):
+    def __init__(self, pil, unique_id=None):
         self.pil = pil
         fmt, bio, self._bytes, size = img2bytes(pil)
-        sha = hashlib.sha256()
-        sha.update(self._bytes)
-        self.unique_id = sha.hexdigest()
+        if (unique_id is None):
+            sha = hashlib.sha256()
+            sha.update(self._bytes)
+            self.unique_id = sha.hexdigest()
+        else:
+            self.unique_id = unique_id
     def get_bytes(self):
         return self._bytes
     def get_pil(self):

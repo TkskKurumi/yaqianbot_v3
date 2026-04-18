@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from PIL import Image
+from typing import List
 class MessageSegment(ABC):
 
     @abstractmethod
@@ -25,10 +27,10 @@ class BaseImage(MessageSegment):
     def is_animated(self):
         pass
     @abstractmethod
-    def get_pil(self):
+    def get_pil(self) -> Image.Image:
         pass
     @abstractmethod
-    def get_animation(self):
+    def get_animation(self) -> List[Image.Image]:
         pass
     @abstractmethod
     def get_bytes(self):
@@ -37,6 +39,19 @@ class BaseImage(MessageSegment):
     @abstractmethod
     def unique_id(self):
         pass
+
+class BaseSendImageSeqAnim(BaseImage):
+    def __init__(self, unique_id, frames, fps):
+        self.frames = frames
+        self.fps = fps
+        self.unique_id = unique_id
+    @property
+    def is_animated(self):
+        return True
+    def get_animation(self):
+        return self.frames
+
+
 class BaseVoice(MessageSegment):
     @abstractmethod
     def as_wave_data(self, samplerate=16000):

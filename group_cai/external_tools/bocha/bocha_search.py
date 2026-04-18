@@ -38,7 +38,7 @@ def add_bocha(mes: BaseMessage, tool_ls: List, tool_map: Dict):
         data = json.dumps({
             "query": query,
             "summary": True,
-            "count": 5
+            "count": 10
         })
         headers = {
             'Authorization': 'Bearer '+key,

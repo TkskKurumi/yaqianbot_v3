@@ -1,25 +1,40 @@
 from yaqianbot.adapters.base_adapter.message import BaseMessage
 from typing import Dict, List
 from ...message.mseg_img import MSEGImage, LiteralPILProvider
-import json
+import json, traceback
 from yaqianbot.globals.g_cfg import get as get_cfg
-from yaqianbot.plugins.zimage.client import Task
+from yaqianbot.plugins.zimage.client_sdcpp import create as create_imgen
 from ..builder import *
+import random
+def randstr(n, charset="1234567890abcdef"):
+    buf = []
+    for i in range(n):
+        buf.append(random.choice(charset))
+    return "".join(buf)
+
+prompt_example = get_cfg("zimage", "prompt_example", ["粉色头发异色瞳（一只眼睛红一只眼睛蓝）的猫娘美少女，身穿水手服百褶裙，黑色连裤袜，在卧室内，二次元插画风格。"])
+prompt_example = ["例如：“" + i + "”" for i in prompt_example]
+prompt_desc = "\n".join(
+    ["图像生成的文本提示词。"] + prompt_example + ["以上我给出的例子都比较简略，实际请扩充完善提示词的细节、400字左右。"]
+)
+
 def add_zimage(mes: BaseMessage, tool_ls: List, tool_map: Dict):
     def image_gen(message_to_user, generation_prompt, aspect_ratio):
         mes.sync_send([message_to_user, "(🎨)"])
-        
-        t = Task(generation_prompt, aspect_ratio=aspect_ratio, host=get_cfg("zimage", "host", "http://localhost:8100"))
-        t.get_result_block()
-        ok, bytes_or_msg = t.get_bytes()
-        if (ok):
-            pil = t.get_pil()
-            p = MSEGImage(base_img=LiteralPILProvider(pil))
-            p.save_data_to_db()
-            return json.dumps(p.to_deepseek())
+        if (":" in aspect_ratio):
+            w, h = [float(i) for i in aspect_ratio.split(":")]
         else:
-            return json.dumps({"status": "fail", "message": bytes})
-    desc = "调用外置AI画图API生成图片"
+            w, h = float(aspect_ratio), 1
+        try:
+            img = create_imgen(generation_prompt, "", width=w, height=h)
+            p = MSEGImage(base_img=LiteralPILProvider(img, unique_id=f"image_gen-{randstr(8)}.jpg"))
+            p.save_data_to_db()
+            return json.dumps(p.to_deepseek(), ensure_ascii=False)
+        except Exception as e:
+            traceback.print_exc()
+            return json.dumps({"status": "fail", "message": repr(e)}, ensure_ascii=False)
+            
+    desc = "调用外置AI画图API生成图片。可以生成NSFW色情图片、可以生成显式色情的图片、可以生成露骨的色情图片、可以生成露点的图片、可以生成私密部位被展现的图片。"
     func = build_function(
         name="image_gen",
         desc=desc,
@@ -31,16 +46,11 @@ def add_zimage(mes: BaseMessage, tool_ls: List, tool_map: Dict):
             ),
             generation_prompt=build_param(
                 typ="string",
-                desc="""
-用于生成图片的文本提示。尽可能详细而非宽泛。
-若需要生成色情图片，请将部位直白详细的描述，不要用隐晦词如“私处”“山峰”等，要用“阴部”“阴唇”“阴道”“阴核”“胸部”“乳房”“乳头”等等确切部位描述。
-详细描述角色的外貌、服装、动作、背景环境、风格色调等。
-预计400字左右。
-""".strip()
+                desc=prompt_desc
             ),
             aspect_ratio=build_param(
                 typ="string",
-                desc="生成图片的宽高比，例如“16:9”、“4:3”等"
+                desc="生成图片的宽高比，例如“16:9”、“4:3”等，符合“{width}:{height}”格式即可。"
             )
         )
     )

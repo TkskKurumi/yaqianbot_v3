@@ -1,0 +1,143 @@
+# 工作文件夹
+rundir: './.vlm_bot'
+
+vlm_bot:
+  plugins:
+    # 每60秒为大模型提供当前时间日期信息
+    - type: timestamp
+      interval: 60
+    
+    # 预置表情包
+    - type: sticker_pack
+      folder: "assets/stickers"
+
+    # 画图插件，兼容stable-diffusion.cpp API
+    - type: img_gen_sdcpp
+      host: "http://192.168.31.117:8100"
+      target_area: 1048576
+      common_negative_prompt: "censored, bar censor, mosaic censor, blur censor, mosaic censoring, fused fingers, broken fingers, extra digits, missing fingers, distorted, distortion, signature, watermark, blur, blurry, overexposure, sketch, draft, unfinished, blackout, censored,  messy, out of focus, bad anatomy, bad proportion, image noise, lossy compression, low quality, worst quality, score_1, score_2, obese"
+      ap_max: 900
+      ap_rec: 1
+      ap_cost: 180
+      prompt_example:
+      - "pink hair, cat ears, heterochromia, red eyes, blue eyes, @smilesmile1312"
+      - "black hair, cat ears, red eyes, low twintails, black serafuku（菜包自设）@fanteam（@fanteam为画师名，使生图AI模仿画师风格，会更好看）"
+      - "black hair, cat ears, red eyes, low twintails, @fanteam（当用户想要看菜包形象的色色图片时，需要去掉水手服标签，因为衣物的描述会和想要的裸露矛盾）"
+      - "black hair, cat ears, asleep, closed eyes, low twintails, @suujiniku（当描述闭眼睡觉时，请不要描述瞳色、与闭眼矛盾）"
+      - "hatsune miku, micro bikini, small breasts, @tianliang_duohe_fangdongye"
+      - "hatsune miku, micro bikini, medium breasts, @taotao"
+      - "amamiya kokoro, pussy, hetero, sex, @dikko （天宫心amamiya kokoro）"
+      - "wakaba mutsumi, pussy, hetero, sex, @okayusonmu （若叶睦wakaba mutsumi）"
+      - "togawa sakiko, pussy, hetero, sex, @mikozin （丰川祥子togawa sakiko）"
+      - "togawa sakiko, from above, deepthroat, upturned eyes, @fanteam（@xxx为画师名，图片生成AI模仿特定画师时画风稳定更好看）"
+      - "from back, from above, bare back, sideboob, soles, white pantyhose, upturned eyes, blush, sexually suggestive, bed sheet, penetration gesture,  wariza, yes-no pillow, yes, wakaba mutsumi, @fanteam"
+      - "@fanteam, tears, smile, half-closed eyes, incoming hug, used condom, nipples, bedsheets, on back, defloration, spread legs, yes-no pillow, yes, kirisame marisa"
+      - "lacrimosa nte, full body, standing（lacrimosa nte是游戏异环中的角色安魂曲）"
+  
+  # 聊天记录序列化DEBUG
+  debug_dump: true
+  logging_level:
+    vlm_client: DEBUG
+    serializer: INFO
+    handler: DEBUG
+  
+  # 视觉大模型上下文长度，达到hit时裁剪消息数量到trim_to（并非精确裁剪到那么多token，按比例裁剪消息数量）
+  context_trim:
+    hit:     120000
+    trim_to:  40000
+
+  # 视觉大模型服务，会按priority顺序重试；同priority会按weight越高越多使用
+  providers:
+    - name: "0-LAN-Qwen3.6-27B"
+      base_url: "http://192.168.31.117:8090/v1"
+      api_key: "xxx"
+      model: "Qwen"
+      priority: 0
+      timeout: 240
+      weight: 1.5
+    - name: "0-LAN-Qwen3.6-35B"
+      base_url: "http://192.168.31.117:8091/v1"
+      api_key: "xxx"
+      model: "Qwen"
+      priority: 0
+      timeout: 240
+      weight: 1
+    - name: "0-Local-Qwen3.6-35B"
+      base_url: "http://localhost:8091/v1"
+      api_key: "xxx"
+      model: "Qwen"
+      priority: 0
+      timeout: 240
+      weight: 1.25
+    - name: "2-openrouter-mimo"
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: xxx
+      model: "xiaomi/mimo-v2.5"
+      priority: 2
+      weight: 1
+    - name: "3-openrouter"
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: xxx
+      model: "qwen/qwen3.7-plus"
+      priority: 3
+      weight: 0.2
+      
+
+  # 推理参数（全局默认，provider 可覆盖）
+  max_tokens: 4096
+  temperature: 0.95
+  top_p: 0.95
+
+  # 系统提示词
+  # 文件：system_prompt: "source:txt:./path/to/prompt.txt"
+  system_prompt: "source:txt:.vlm_bot/system_prompt.txt"
+
+  # 触发配置
+  trigger:
+    at_mention: true
+    # 按关键词回复触发
+    keywords:
+      - "菜包"
+      - "bot"
+      - "机器人"
+    # 匹配关键词时的回复概率
+    keyword_prob: 1.0
+
+    # 按时间触发，至少从time_min_sec开始，概率到time_max_sec最高
+    time_min_sec: 300
+    time_max_sec: 1800
+    time_prob_min: 0.1
+    time_prob_max: 1.0
+
+    # 触发后等待数秒再回复消息（允许期间接收更多消息）
+    wait_batch_sec: 5
+    wait_ated_sec: 5
+
+  # 消息历史裁剪
+  mes_cnt_max: 30000
+  mes_cnt_pref: 10000
+
+  # 目前只支持image_vision_mode: true
+  image_vision_mode: true
+  # 目前不支持视频输入
+  video_vision_mode: false
+
+  # 工具调用
+  max_tool_calls: 5
+
+
+plugins:
+  - vlm_bot.handler
+  - yaqianbot.plugins.plg_dev
+
+adapters:
+  - 
+    # onebot WebSocket协议（python端为服务端）
+    adapter: yaqianbot.adapters.aiocqhttp_adapter
+    config:
+      port: 8011
+      host: 0.0.0.0
+
+# 管理用户QQ号，允许调用clear_session
+superusers:
+  - 402254524

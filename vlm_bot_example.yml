@@ -90,7 +90,7 @@ vlm_bot:
 
   # 系统提示词
   # 文件：system_prompt: "source:txt:./path/to/prompt.txt"
-  system_prompt: "source:txt:.vlm_bot/system_prompt.txt"
+  system_prompt: "source:txt:vlm_bot_system_prompt_example.txt"
 
   # 触发配置
   trigger:
